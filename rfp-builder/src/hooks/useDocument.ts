@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { DocumentState, DocumentSection } from '../types';
+import { DocumentState, DocumentSection, QualityReview, SectionProgress } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 
 function createInitialState(): DocumentState {
@@ -23,6 +23,8 @@ export function useDocument(projectId?: string | null) {
   );
   const [isStreaming, setIsStreaming] = useState(false);
   const [showPlaceholder, setShowPlaceholder] = useState(false);
+  const [currentSection, setCurrentSection] = useState<SectionProgress | null>(null);
+  const [qualityReview, setQualityReview] = useState<QualityReview | null>(null);
   const streamBufferRef = useRef('');
 
   // Autosave on every change (skip during streaming to avoid thrashing)
@@ -163,8 +165,9 @@ export function useDocument(projectId?: string | null) {
   const handleStreamStart = useCallback(() => {
     setIsStreaming(true);
     setShowPlaceholder(true);
+    setCurrentSection(null);
+    setQualityReview(null);
     streamBufferRef.current = '';
-    // Reset stream buffer
     // Clear all sections for fresh streamed content
     setDocumentState((prev) => ({
       ...prev,
@@ -227,10 +230,48 @@ export function useDocument(projectId?: string | null) {
     }
   }, []);
 
+  // Called when a new section starts generating (pipeline mode)
+  const handleSectionStart = useCallback((title: string, index: number, total: number) => {
+    setCurrentSection({ title, index, total });
+    setShowPlaceholder(false);
+  }, []);
+
+  // Called when a section finishes generating (pipeline mode)
+  const handleSectionDone = useCallback((title: string, content: string) => {
+    // Update or add the section with its final content
+    setDocumentState((prev) => {
+      const existingIdx = prev.sections.findIndex(
+        (s) => s.title.toLowerCase() === title.toLowerCase()
+      );
+      if (existingIdx >= 0) {
+        // Update existing section
+        const updated = [...prev.sections];
+        updated[existingIdx] = { ...updated[existingIdx], content };
+        return { ...prev, meta: { ...prev.meta, updatedAt: Date.now() }, sections: updated };
+      }
+      // This shouldn't normally happen since handleStreamChunk creates sections,
+      // but handle it gracefully
+      return {
+        ...prev,
+        meta: { ...prev.meta, updatedAt: Date.now() },
+        sections: [
+          ...prev.sections,
+          { id: uuidv4(), title, content, order: prev.sections.length },
+        ],
+      };
+    });
+  }, []);
+
+  // Called when quality review completes (pipeline mode, async)
+  const handleReviewResult = useCallback((review: QualityReview) => {
+    setQualityReview(review);
+  }, []);
+
   // Called when streaming is done
   const handleStreamDone = useCallback((fullText: string) => {
     setIsStreaming(false);
     setShowPlaceholder(false);
+    setCurrentSection(null);
     // Final parse to ensure we have the complete document
     streamBufferRef.current = fullText;
     const sectionRegex = /^##\s+(.+)$/gm;
@@ -276,8 +317,9 @@ export function useDocument(projectId?: string | null) {
   const resetDocument = useCallback(() => {
     setDocumentState(createInitialState());
     setIsStreaming(false);
-    // Reset stream buffer
     setShowPlaceholder(false);
+    setCurrentSection(null);
+    setQualityReview(null);
     streamBufferRef.current = '';
   }, []);
 
@@ -308,5 +350,11 @@ export function useDocument(projectId?: string | null) {
     handleStreamStart,
     handleStreamChunk,
     handleStreamDone,
+    // Pipeline
+    currentSection,
+    qualityReview,
+    handleSectionStart,
+    handleSectionDone,
+    handleReviewResult,
   };
 }

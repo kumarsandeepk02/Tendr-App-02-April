@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { ChatMessage, UnifiedFlowPhase, GuidedStep } from '../types';
+import { ChatMessage, UnifiedFlowPhase, GuidedStep, OutlineSection, SectionProgress } from '../types';
 import MessageBubble from './MessageBubble';
 import TextareaAutosize from 'react-textarea-autosize';
 import { useDropzone } from 'react-dropzone';
@@ -12,6 +12,9 @@ import {
   SkipForward,
   FastForward,
   FileText,
+  RefreshCw,
+  CheckSquare,
+  Square,
 } from 'lucide-react';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
@@ -22,6 +25,9 @@ interface ChatProps {
   isGenerating: boolean;
   phase: UnifiedFlowPhase;
   guidedStep: GuidedStep | null;
+  outlineSections: OutlineSection[];
+  isOutlineLoading: boolean;
+  currentSection: SectionProgress | null;
   onSendMessage: (content: string) => void;
   onRetry: () => void;
   onFileUpload: () => void;
@@ -30,6 +36,9 @@ interface ChatProps {
   onScopeUpload: (fileText: string) => void;
   onSkipScopeUpload: () => void;
   onTriggerGenerate: (fileText?: string) => void;
+  onToggleOutlineSection: (sectionId: string) => void;
+  onApproveOutline: () => void;
+  onRegenerateOutline: () => void;
 }
 
 const TypingIndicator: React.FC = () => (
@@ -236,12 +245,111 @@ const ScopeUploadZone: React.FC<{
   );
 };
 
+// Outline review checklist shown before generation
+const OutlineReview: React.FC<{
+  sections: OutlineSection[];
+  isLoading: boolean;
+  onToggle: (id: string) => void;
+  onApprove: () => void;
+  onRegenerate: () => void;
+}> = ({ sections, isLoading, onToggle, onApprove, onRegenerate }) => {
+  const includedCount = sections.filter((s) => s.included).length;
+
+  if (isLoading) {
+    return (
+      <div className="mx-4 mb-4 animate-in slide-in-from-bottom-4">
+        <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4">
+          <div className="flex items-center gap-3 justify-center py-4">
+            <Loader2 size={20} className="text-indigo-600 animate-spin" />
+            <span className="text-sm text-indigo-700 font-medium">
+              Generating document outline...
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (sections.length === 0) return null;
+
+  return (
+    <div className="mx-4 mb-4 animate-in slide-in-from-bottom-4">
+      <div className="bg-white border border-indigo-200 rounded-xl overflow-hidden">
+        {/* Header */}
+        <div className="bg-indigo-50 px-4 py-3 border-b border-indigo-200">
+          <h4 className="text-sm font-semibold text-indigo-900">
+            Proposed Document Outline
+          </h4>
+          <p className="text-xs text-indigo-600 mt-0.5">
+            Toggle sections on or off before generating
+          </p>
+        </div>
+
+        {/* Section checklist */}
+        <div className="max-h-64 overflow-y-auto divide-y divide-gray-100">
+          {sections.map((section) => (
+            <button
+              key={section.id}
+              onClick={() => onToggle(section.id)}
+              className="w-full flex items-start gap-3 px-4 py-2.5 hover:bg-gray-50 transition-colors text-left"
+            >
+              <span className="flex-shrink-0 mt-0.5">
+                {section.included ? (
+                  <CheckSquare size={16} className="text-indigo-600" />
+                ) : (
+                  <Square size={16} className="text-gray-300" />
+                )}
+              </span>
+              <div className="min-w-0">
+                <p
+                  className={`text-sm font-medium ${
+                    section.included ? 'text-gray-900' : 'text-gray-400 line-through'
+                  }`}
+                >
+                  {section.title}
+                </p>
+                {section.description && (
+                  <p className="text-xs text-gray-500 mt-0.5 truncate">
+                    {section.description}
+                  </p>
+                )}
+              </div>
+            </button>
+          ))}
+        </div>
+
+        {/* Actions */}
+        <div className="border-t border-indigo-200 px-4 py-3 bg-gray-50 flex items-center gap-2">
+          <button
+            onClick={onRegenerate}
+            className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-100 transition-colors"
+          >
+            <RefreshCw size={12} />
+            Regenerate
+          </button>
+          <button
+            onClick={onApprove}
+            disabled={includedCount === 0}
+            className="flex-1 flex items-center justify-center gap-2 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            <FileText size={14} />
+            Generate Document ({includedCount} sections)
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const Chat: React.FC<ChatProps> = ({
   messages,
   isTyping,
   isGenerating,
   phase,
   guidedStep,
+  outlineSections,
+  isOutlineLoading,
+  currentSection,
   onSendMessage,
   onRetry,
   onFileUpload,
@@ -250,6 +358,9 @@ const Chat: React.FC<ChatProps> = ({
   onScopeUpload,
   onSkipScopeUpload,
   onTriggerGenerate,
+  onToggleOutlineSection,
+  onApproveOutline,
+  onRegenerateOutline,
 }) => {
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -274,7 +385,7 @@ const Chat: React.FC<ChatProps> = ({
     }
   };
 
-  const isInputDisabled = isTyping || isGenerating || phase === 'upload_prompt' || phase === 'generating';
+  const isInputDisabled = isTyping || isGenerating || phase === 'upload_prompt' || phase === 'outline_review' || phase === 'generating';
 
   return (
     <div className="flex flex-col h-full bg-white">
@@ -311,12 +422,31 @@ const Chat: React.FC<ChatProps> = ({
               <Loader2 size={16} className="text-indigo-600 animate-spin" />
             </div>
             <div className="bg-indigo-50 rounded-2xl px-4 py-3 border border-indigo-100">
-              <p className="text-sm text-indigo-700 font-medium">
-                Generating your document...
-              </p>
-              <p className="text-xs text-indigo-500 mt-1">
-                Watch it appear in the document panel →
-              </p>
+              {currentSection ? (
+                <>
+                  <p className="text-sm text-indigo-700 font-medium">
+                    Generating section {currentSection.index + 1} of {currentSection.total}: {currentSection.title}
+                  </p>
+                  <div className="mt-2 w-full bg-indigo-200 rounded-full h-1.5">
+                    <div
+                      className="bg-indigo-600 h-1.5 rounded-full transition-all duration-500"
+                      style={{ width: `${((currentSection.index + 1) / currentSection.total) * 100}%` }}
+                    />
+                  </div>
+                  <p className="text-xs text-indigo-500 mt-1">
+                    Watch sections appear in the document panel →
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm text-indigo-700 font-medium">
+                    Generating your document...
+                  </p>
+                  <p className="text-xs text-indigo-500 mt-1">
+                    Watch it appear in the document panel →
+                  </p>
+                </>
+              )}
             </div>
           </div>
         )}
@@ -337,6 +467,17 @@ const Chat: React.FC<ChatProps> = ({
         <InlineUploadZone
           onUploadAndGenerate={(fileText) => onTriggerGenerate(fileText)}
           onSkipAndGenerate={() => onTriggerGenerate()}
+        />
+      )}
+
+      {/* Outline review — shown during outline_review phase */}
+      {(phase === 'outline_review' || isOutlineLoading) && (
+        <OutlineReview
+          sections={outlineSections}
+          isLoading={isOutlineLoading}
+          onToggle={onToggleOutlineSection}
+          onApprove={onApproveOutline}
+          onRegenerate={onRegenerateOutline}
         />
       )}
 

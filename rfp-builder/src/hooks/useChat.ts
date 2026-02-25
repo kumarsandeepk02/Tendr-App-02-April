@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import axios from 'axios';
-import { ChatMessage, GuidedStep, ChatRole, UnifiedFlowPhase } from '../types';
+import { ChatMessage, GuidedStep, ChatRole, UnifiedFlowPhase, OutlineSection, QualityReview } from '../types';
 import {
   GUIDED_QUESTIONS,
   WELCOME_MESSAGE,
@@ -8,6 +8,7 @@ import {
   buildQuestionSystemAddendum,
   buildGenerationSystemPrompt,
   buildGenerationPrompt,
+  buildOutlinePrompt,
 } from '../utils/prompts';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
@@ -16,12 +17,17 @@ function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).substr(2, 9);
 }
 
+const USE_PIPELINE = process.env.REACT_APP_USE_PIPELINE === 'true';
+
 interface UseChatOptions {
   onSectionsUpdate?: (markdown: string) => void;
   onMetaUpdate?: (updates: Record<string, string>) => void;
   onStreamStart?: () => void;
   onStreamChunk?: (chunk: string) => void;
   onStreamDone?: (fullText: string) => void;
+  onSectionStart?: (title: string, index: number, total: number) => void;
+  onSectionDone?: (title: string, content: string) => void;
+  onReviewResult?: (review: QualityReview) => void;
   projectId?: string | null;
 }
 
@@ -34,10 +40,13 @@ export function useChat(options?: UseChatOptions) {
   const [isGenerating, setIsGenerating] = useState(false);
   const [gatheredAnswers, setGatheredAnswers] = useState<Record<string, string>>({});
   const [uploadedFileText, setUploadedFileText] = useState<string>('');
+  const [outlineSections, setOutlineSections] = useState<OutlineSection[]>([]);
+  const [isOutlineLoading, setIsOutlineLoading] = useState(false);
+  const fileContextRef = useRef<string | undefined>(undefined);
   const optionsRef = useRef(options);
   optionsRef.current = options;
 
-  // Autosave chat state
+  // Autosave chat state (including gatheredAnswers and uploadedFileText)
   useEffect(() => {
     const projectId = optionsRef.current?.projectId;
     const storageKey = projectId
@@ -47,7 +56,11 @@ export function useChat(options?: UseChatOptions) {
       try {
         const existing = window.localStorage.getItem(storageKey);
         const draft = existing ? JSON.parse(existing) : {};
-        draft.chatState = { messages, guidedStep, phase };
+        // Truncate uploadedFileText to avoid localStorage quota issues
+        const truncatedFileText = uploadedFileText.length > 10000
+          ? uploadedFileText.substring(0, 10000)
+          : uploadedFileText;
+        draft.chatState = { messages, guidedStep, phase, gatheredAnswers, uploadedFileText: truncatedFileText, outlineSections };
         draft.savedAt = Date.now();
         window.localStorage.setItem(storageKey, JSON.stringify(draft));
       } catch (e) {
@@ -55,7 +68,7 @@ export function useChat(options?: UseChatOptions) {
       }
     }, 500);
     return () => clearTimeout(timeout);
-  }, [messages, guidedStep, phase]);
+  }, [messages, guidedStep, phase, gatheredAnswers, uploadedFileText, outlineSections]);
 
   const addMessage = useCallback(
     (role: ChatRole, content: string, extra?: Partial<ChatMessage>) => {
@@ -284,9 +297,116 @@ export function useChat(options?: UseChatOptions) {
     }, 300);
   }, [addMessage]);
 
-  // Stream-based generation
+  // Helper: read SSE stream and dispatch events to callbacks
+  const readSSEStream = useCallback(async (response: Response, usePipeline: boolean) => {
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error('No readable stream');
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const parsed = JSON.parse(line.slice(6));
+            if (parsed.type === 'text') {
+              optionsRef.current?.onStreamChunk?.(parsed.content);
+            } else if (parsed.type === 'done') {
+              optionsRef.current?.onStreamDone?.(parsed.content);
+            } else if (parsed.type === 'error') {
+              throw new Error(parsed.content);
+            } else if (usePipeline && parsed.type === 'section_start') {
+              optionsRef.current?.onSectionStart?.(parsed.title, parsed.index, parsed.total);
+            } else if (usePipeline && parsed.type === 'section_done') {
+              optionsRef.current?.onSectionDone?.(parsed.title, parsed.content);
+            } else if (usePipeline && parsed.type === 'review') {
+              optionsRef.current?.onReviewResult?.(parsed.content);
+            }
+          } catch (parseErr: any) {
+            if (parseErr.message && parseErr.message !== 'Unexpected end of JSON input') {
+              if (parseErr.message === 'Stream failed. Please try again.' || parseErr.message === 'Pipeline failed. Please try again.') {
+                throw parseErr;
+              }
+              // swallow partial parse errors
+            }
+          }
+        }
+      }
+    }
+  }, []);
+
+  // Stream-based generation (monolithic fallback)
+  const streamGenerateMonolithic = useCallback(
+    async (fileContext?: string, confirmedSections?: string[]) => {
+      const docType = (gatheredAnswers.doc_type?.toUpperCase().includes('RFI') ? 'RFI' : 'RFP') as 'RFI' | 'RFP';
+      const systemPrompt = buildGenerationSystemPrompt(docType, gatheredAnswers, confirmedSections);
+      const userPrompt = buildGenerationPrompt(gatheredAnswers, fileContext);
+
+      const MAX_HISTORY_MESSAGES = 20;
+      const recentMessages = messages
+        .filter((m) => !m.isLoading && !m.isError)
+        .slice(-MAX_HISTORY_MESSAGES)
+        .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }));
+
+      const apiMessages = [
+        ...recentMessages,
+        { role: 'user' as const, content: userPrompt },
+      ];
+
+      const response = await fetch(`${API_URL}/api/chat/stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: apiMessages,
+          systemPrompt,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Stream request failed');
+      }
+
+      await readSSEStream(response, false);
+    },
+    [gatheredAnswers, messages, readSSEStream]
+  );
+
+  // Pipeline-based generation (multi-agent)
+  const streamGeneratePipeline = useCallback(
+    async (fileContext?: string, confirmedSections?: string[]) => {
+      const docType = (gatheredAnswers.doc_type?.toUpperCase().includes('RFI') ? 'RFI' : 'RFP') as 'RFI' | 'RFP';
+
+      const response = await fetch(`${API_URL}/api/chat/pipeline`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          answers: gatheredAnswers,
+          fileContext,
+          docType,
+          confirmedSections,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Pipeline request failed');
+      }
+
+      await readSSEStream(response, true);
+    },
+    [gatheredAnswers, readSSEStream]
+  );
+
+  // Stream-based generation — uses pipeline or monolithic based on feature flag
   const streamGenerate = useCallback(
-    async (fileContext?: string) => {
+    async (fileContext?: string, confirmedSections?: string[]) => {
       setIsGenerating(true);
       setPhase('generating');
       setError(null);
@@ -295,62 +415,17 @@ export function useChat(options?: UseChatOptions) {
       optionsRef.current?.onStreamStart?.();
 
       try {
-        const docType = (gatheredAnswers.doc_type?.toUpperCase().includes('RFI') ? 'RFI' : 'RFP') as 'RFI' | 'RFP';
-        const systemPrompt = buildGenerationSystemPrompt(docType);
-        const userPrompt = buildGenerationPrompt(gatheredAnswers, fileContext);
-
-        const apiMessages = [
-          { role: 'user' as const, content: userPrompt },
-        ];
-
-        const response = await fetch(`${API_URL}/api/chat/stream`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            messages: apiMessages,
-            systemPrompt,
-          }),
-        });
-
-        if (!response.ok) {
-          throw new Error('Stream request failed');
-        }
-
-        const reader = response.body?.getReader();
-        if (!reader) throw new Error('No readable stream');
-
-        const decoder = new TextDecoder();
-        let buffer = '';
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
-
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              try {
-                const parsed = JSON.parse(line.slice(6));
-                if (parsed.type === 'text') {
-                  optionsRef.current?.onStreamChunk?.(parsed.content);
-                } else if (parsed.type === 'done') {
-                  optionsRef.current?.onStreamDone?.(parsed.content);
-                } else if (parsed.type === 'error') {
-                  throw new Error(parsed.content);
-                }
-              } catch (parseErr: any) {
-                if (parseErr.message && parseErr.message !== 'Unexpected end of JSON input') {
-                  if (parseErr.message === 'Stream failed. Please try again.') {
-                    throw parseErr;
-                  }
-                  // swallow partial parse errors
-                }
-              }
-            }
+        if (USE_PIPELINE) {
+          try {
+            await streamGeneratePipeline(fileContext, confirmedSections);
+          } catch (pipelineErr) {
+            console.warn('Pipeline failed, falling back to monolithic:', pipelineErr);
+            // Reset stream state for fallback
+            optionsRef.current?.onStreamStart?.();
+            await streamGenerateMonolithic(fileContext, confirmedSections);
           }
+        } else {
+          await streamGenerateMonolithic(fileContext, confirmedSections);
         }
 
         // Add completion message
@@ -378,20 +453,107 @@ export function useChat(options?: UseChatOptions) {
         setIsGenerating(false);
       }
     },
-    [gatheredAnswers]
+    [streamGeneratePipeline, streamGenerateMonolithic]
   );
 
-  // Trigger generation (with optional additional file context from final upload)
+  // Generate an outline (lightweight non-streaming call) before full generation
+  const generateOutline = useCallback(
+    async (fileContext?: string) => {
+      setIsOutlineLoading(true);
+      setError(null);
+
+      try {
+        const outlinePrompt = buildOutlinePrompt(gatheredAnswers, fileContext);
+
+        const res = await axios.post(`${API_URL}/api/chat`, {
+          messages: [{ role: 'user', content: outlinePrompt }],
+          systemPrompt: 'You are an expert procurement consultant. Return ONLY a valid JSON array as requested. No other text.',
+        });
+
+        const content = res.data.content || '';
+
+        // Extract JSON from the response (handle markdown code fences)
+        let jsonStr = content;
+        const fenceMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
+        if (fenceMatch) {
+          jsonStr = fenceMatch[1].trim();
+        }
+
+        const parsed = JSON.parse(jsonStr);
+
+        if (!Array.isArray(parsed)) {
+          throw new Error('Invalid outline format');
+        }
+
+        const sections: OutlineSection[] = parsed.map(
+          (item: { title: string; description: string }, idx: number) => ({
+            id: generateId(),
+            title: item.title,
+            description: item.description || '',
+            included: true,
+            order: idx,
+          })
+        );
+
+        setOutlineSections(sections);
+        setPhase('outline_review');
+
+        addMessage(
+          'assistant',
+          "Here's a proposed outline for your document. Toggle sections on or off, then click **Generate Document** to proceed.",
+          { isOutline: true }
+        );
+      } catch (err: any) {
+        console.warn('Outline generation failed, proceeding with default sections:', err);
+        // Fall back to direct generation without outline
+        setOutlineSections([]);
+        streamGenerate(fileContext);
+        return;
+      } finally {
+        setIsOutlineLoading(false);
+      }
+    },
+    [gatheredAnswers, addMessage, streamGenerate]
+  );
+
+  // Trigger generation — now goes through outline step first
   const triggerGenerate = useCallback(
     (fileText?: string) => {
       // Combine scope document (uploaded earlier) with any final upload
       const combinedContext = [uploadedFileText, fileText || '']
         .filter(Boolean)
         .join('\n\n---\n\n');
-      streamGenerate(combinedContext || undefined);
+      fileContextRef.current = combinedContext || undefined;
+      generateOutline(combinedContext || undefined);
     },
-    [uploadedFileText, streamGenerate]
+    [uploadedFileText, generateOutline]
   );
+
+  // Toggle a section in the outline
+  const toggleOutlineSection = useCallback((sectionId: string) => {
+    setOutlineSections((prev) =>
+      prev.map((s) =>
+        s.id === sectionId ? { ...s, included: !s.included } : s
+      )
+    );
+  }, []);
+
+  // Approve the outline and proceed to full generation
+  const approveOutline = useCallback(() => {
+    const confirmedTitles = outlineSections
+      .filter((s) => s.included)
+      .sort((a, b) => a.order - b.order)
+      .map((s) => s.title);
+
+    addMessage('user', `Generate document with ${confirmedTitles.length} sections`);
+    streamGenerate(fileContextRef.current, confirmedTitles);
+  }, [outlineSections, addMessage, streamGenerate]);
+
+  // Regenerate the outline (re-call Claude for a new proposal)
+  const regenerateOutline = useCallback(() => {
+    setOutlineSections([]);
+    generateOutline(fileContextRef.current);
+  }, [generateOutline]);
 
   const retryLast = useCallback(async () => {
     const nonErrorMessages = messages.filter((m) => !m.isError);
@@ -404,10 +566,16 @@ export function useChat(options?: UseChatOptions) {
       messages: ChatMessage[];
       guidedStep: GuidedStep | null;
       phase: UnifiedFlowPhase;
+      gatheredAnswers?: Record<string, string>;
+      uploadedFileText?: string;
+      outlineSections?: OutlineSection[];
     }) => {
       setMessages(state.messages);
       setGuidedStep(state.guidedStep);
       setPhase(state.phase || 'questions');
+      setGatheredAnswers(state.gatheredAnswers || {});
+      setUploadedFileText(state.uploadedFileText || '');
+      setOutlineSections(state.outlineSections || []);
     },
     []
   );
@@ -419,7 +587,10 @@ export function useChat(options?: UseChatOptions) {
     setError(null);
     setGatheredAnswers({});
     setUploadedFileText('');
+    setOutlineSections([]);
     setIsGenerating(false);
+    setIsOutlineLoading(false);
+    fileContextRef.current = undefined;
   }, []);
 
   return {
@@ -430,6 +601,9 @@ export function useChat(options?: UseChatOptions) {
     error,
     isGenerating,
     gatheredAnswers,
+    uploadedFileText,
+    outlineSections,
+    isOutlineLoading,
     startFlow,
     sendMessage,
     skipCurrentStep,
@@ -437,6 +611,9 @@ export function useChat(options?: UseChatOptions) {
     handleScopeUpload,
     skipScopeUpload,
     triggerGenerate,
+    toggleOutlineSection,
+    approveOutline,
+    regenerateOutline,
     retryLast,
     restoreChat,
     resetChat,

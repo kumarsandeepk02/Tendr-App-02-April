@@ -9,9 +9,18 @@ export interface ChatMessage {
   timestamp: number;
   isLoading?: boolean;
   isError?: boolean;
+  isOutline?: boolean;
 }
 
-export type UnifiedFlowPhase = 'questions' | 'upload_prompt' | 'generating' | 'done';
+export interface OutlineSection {
+  id: string;
+  title: string;
+  description: string;
+  included: boolean;
+  order: number;
+}
+
+export type UnifiedFlowPhase = 'questions' | 'upload_prompt' | 'outline_review' | 'generating' | 'done';
 
 export type GuidedStep =
   | 'doc_type'
@@ -90,6 +99,9 @@ export interface Draft {
     messages: ChatMessage[];
     guidedStep: GuidedStep | null;
     phase: UnifiedFlowPhase;
+    gatheredAnswers?: Record<string, string>;
+    uploadedFileText?: string;
+    outlineSections?: OutlineSection[];
   };
   documentState: DocumentState;
   savedAt: number;
@@ -118,6 +130,37 @@ export interface ProjectIndex {
   version: number;
   activeProjectId: string | null;
   projects: ProjectMeta[];
+}
+
+// ===================== Pipeline Types =====================
+
+export type PipelineEventType = 'section_start' | 'text' | 'section_done' | 'done' | 'review' | 'error';
+
+export interface PipelineEvent {
+  type: PipelineEventType;
+  content?: string;
+  title?: string;
+  index?: number;
+  total?: number;
+}
+
+export interface ReviewIssue {
+  section: string;
+  severity: 'error' | 'warning' | 'info';
+  message: string;
+}
+
+export interface QualityReview {
+  score: number;
+  issues: ReviewIssue[];
+  consistencyNotes: string[];
+  missingElements: string[];
+}
+
+export interface SectionProgress {
+  title: string;
+  index: number;
+  total: number;
 }
 
 // ===================== Onboarding =====================

@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { DocumentState, DocumentSection } from '../types';
+import { DocumentState, DocumentSection, QualityReview, SectionProgress } from '../types';
 import SectionCard from './SectionCard';
 import ProgressBar from './ProgressBar';
-import { Plus, FileText, Loader2, PenLine } from 'lucide-react';
+import { Plus, FileText, Loader2, PenLine, ChevronDown, ChevronUp, X, AlertTriangle, AlertCircle, Info } from 'lucide-react';
 import MasterEditor from './MasterEditor';
 
 interface DocumentPreviewProps {
@@ -11,11 +11,124 @@ interface DocumentPreviewProps {
   totalSections: number;
   isStreaming: boolean;
   showPlaceholder: boolean;
+  currentSection: SectionProgress | null;
+  qualityReview: QualityReview | null;
   onUpdateSection: (id: string, updates: Partial<DocumentSection>) => void;
   onRemoveSection: (id: string) => void;
   onAddSection: (title: string, content?: string) => void;
   onReorderSections: (sections: DocumentSection[]) => void;
 }
+
+// Quality Review Panel
+const QualityReviewPanel: React.FC<{ review: QualityReview; onDismiss: () => void }> = ({ review, onDismiss }) => {
+  const [isExpanded, setIsExpanded] = useState(true);
+
+  const scoreColor = review.score >= 80 ? 'bg-green-500' : review.score >= 60 ? 'bg-yellow-500' : 'bg-red-500';
+  const scoreTextColor = review.score >= 80 ? 'text-green-700' : review.score >= 60 ? 'text-yellow-700' : 'text-red-700';
+  const scoreBgColor = review.score >= 80 ? 'bg-green-50' : review.score >= 60 ? 'bg-yellow-50' : 'bg-red-50';
+
+  const errorCount = review.issues.filter(i => i.severity === 'error').length;
+  const warningCount = review.issues.filter(i => i.severity === 'warning').length;
+  const infoCount = review.issues.filter(i => i.severity === 'info').length;
+
+  const severityIcon = (severity: string) => {
+    switch (severity) {
+      case 'error': return <AlertCircle size={14} className="text-red-500 flex-shrink-0" />;
+      case 'warning': return <AlertTriangle size={14} className="text-yellow-500 flex-shrink-0" />;
+      default: return <Info size={14} className="text-blue-500 flex-shrink-0" />;
+    }
+  };
+
+  return (
+    <div className="mx-4 mb-4 border border-gray-200 rounded-lg overflow-hidden animate-in slide-in-from-top-4">
+      {/* Header */}
+      <div className={`flex items-center justify-between px-4 py-2.5 ${scoreBgColor}`}>
+        <div className="flex items-center gap-3">
+          <div className={`w-8 h-8 rounded-full ${scoreColor} text-white flex items-center justify-center text-xs font-bold`}>
+            {review.score}
+          </div>
+          <div>
+            <p className={`text-sm font-semibold ${scoreTextColor}`}>
+              Quality Score
+            </p>
+            <div className="flex items-center gap-2 text-xs text-gray-500">
+              {errorCount > 0 && <span className="text-red-600">{errorCount} errors</span>}
+              {warningCount > 0 && <span className="text-yellow-600">{warningCount} warnings</span>}
+              {infoCount > 0 && <span className="text-blue-600">{infoCount} suggestions</span>}
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => setIsExpanded(!isExpanded)}
+            className="p-1 text-gray-400 hover:text-gray-600 transition-colors"
+          >
+            {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+          </button>
+          <button
+            onClick={onDismiss}
+            className="p-1 text-gray-400 hover:text-gray-600 transition-colors"
+          >
+            <X size={16} />
+          </button>
+        </div>
+      </div>
+
+      {/* Expandable content */}
+      {isExpanded && (
+        <div className="bg-white divide-y divide-gray-100">
+          {/* Issues */}
+          {review.issues.length > 0 && (
+            <div className="px-4 py-3">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Issues</p>
+              <div className="space-y-2">
+                {review.issues.map((issue, i) => (
+                  <div key={i} className="flex items-start gap-2">
+                    {severityIcon(issue.severity)}
+                    <div className="min-w-0">
+                      <span className="text-xs font-medium text-gray-700">{issue.section}:</span>{' '}
+                      <span className="text-xs text-gray-600">{issue.message}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Consistency Notes */}
+          {review.consistencyNotes.length > 0 && (
+            <div className="px-4 py-3">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Consistency</p>
+              <ul className="space-y-1">
+                {review.consistencyNotes.map((note, i) => (
+                  <li key={i} className="text-xs text-gray-600 flex items-start gap-2">
+                    <span className="text-gray-300 mt-0.5">-</span>
+                    {note}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* Missing Elements */}
+          {review.missingElements.length > 0 && (
+            <div className="px-4 py-3">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Missing Elements</p>
+              <ul className="space-y-1">
+                {review.missingElements.map((elem, i) => (
+                  <li key={i} className="text-xs text-gray-600 flex items-start gap-2">
+                    <span className="text-gray-300 mt-0.5">-</span>
+                    {elem}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
 
 const GeneratingPlaceholder: React.FC = () => (
   <div className="flex flex-col items-center justify-center py-16 animate-in slide-in-from-bottom-4">
@@ -49,6 +162,8 @@ const DocumentPreview: React.FC<DocumentPreviewProps> = ({
   totalSections,
   isStreaming,
   showPlaceholder,
+  currentSection,
+  qualityReview,
   onUpdateSection,
   onRemoveSection,
   onAddSection,
@@ -57,6 +172,7 @@ const DocumentPreview: React.FC<DocumentPreviewProps> = ({
   const [newSectionTitle, setNewSectionTitle] = useState('');
   const [isAddingSection, setIsAddingSection] = useState(false);
   const [showMasterEditor, setShowMasterEditor] = useState(false);
+  const [reviewDismissed, setReviewDismissed] = useState(false);
 
   const handleAddSection = () => {
     if (newSectionTitle.trim()) {
@@ -131,6 +247,14 @@ const DocumentPreview: React.FC<DocumentPreviewProps> = ({
           completed={completedSections}
           total={totalSections}
           isPulsing={isStreaming}
+        />
+      )}
+
+      {/* Quality Review Panel */}
+      {qualityReview && !isStreaming && !reviewDismissed && (
+        <QualityReviewPanel
+          review={qualityReview}
+          onDismiss={() => setReviewDismissed(true)}
         />
       )}
 

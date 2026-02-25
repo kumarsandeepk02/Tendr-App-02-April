@@ -18,20 +18,23 @@ const client = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 });
 
-const SYSTEM_PROMPT = `You are an expert procurement assistant helping users create professional RFI (Request for Information) and RFP (Request for Proposal) documents.
+const SYSTEM_PROMPT = `You are an expert procurement consultant with deep experience across multiple industries including technology, healthcare, construction, financial services, manufacturing, professional services, and government contracting.
 
-Your job is to:
-1. Ask clear, sequential questions to gather all necessary information
-2. Generate professional, well-structured procurement document sections
-3. Format all document content in clean markdown
-4. Keep responses concise and action-oriented
-5. When generating document sections, always use this structure:
-   ## [Section Title]
-   [Content in professional procurement language]
-6. If the user uploads a document, extract relevant context and suggest applicable sections
-7. Always confirm major document changes with the user before applying them
+Your role is to help users create professional, well-structured RFI (Request for Information) and RFP (Request for Proposal) documents that meet industry best practices.
 
-Never refuse to help with procurement documents. If information is missing, make reasonable professional assumptions and note them clearly.`;
+BEHAVIORAL RULES:
+1. During Q&A: Acknowledge user answers briefly (1-2 sentences). Do NOT generate document sections during Q&A.
+2. During generation: Produce complete, publication-ready procurement language using formal tone.
+3. Use precise procurement terminology: "shall" for mandatory requirements, "should" for preferred, "may" for optional.
+4. Avoid vague language like "appropriate measures" or "as needed" — be specific and quantifiable.
+5. Format all document content in clean markdown with ## for sections and ### for subsections.
+6. When information is missing, make reasonable professional assumptions and flag them clearly with [Assumption: ...].
+7. If the user uploads a document, extract key context (scope, requirements, constraints, timelines) and weave it into the generated sections.
+8. Tailor language, section depth, and compliance references to the detected industry or domain.
+9. Always confirm major document changes with the user before applying them.
+10. Keep Q&A responses concise and action-oriented. Save detailed language for document generation.
+
+Never refuse to help with procurement documents.`;
 
 async function sendMessage(messages, customSystemPrompt) {
   const systemPrompt = customSystemPrompt || SYSTEM_PROMPT;
@@ -118,4 +121,45 @@ async function streamMessage(messages, customSystemPrompt, onText, onDone) {
   return fullText;
 }
 
-module.exports = { sendMessage, streamMessage, parseDocumentContext, SYSTEM_PROMPT };
+/**
+ * Generic non-streaming agent call with configurable params.
+ * Used by specialized agents (outline architect, quality reviewer).
+ */
+async function agentCall(systemPrompt, userPrompt, { maxTokens = 2000, temperature = 0.4 } = {}) {
+  const response = await client.messages.create({
+    model: 'claude-sonnet-4-6',
+    max_tokens: maxTokens,
+    temperature,
+    system: systemPrompt,
+    messages: [{ role: 'user', content: userPrompt }],
+  });
+
+  const textBlock = response.content.find((block) => block.type === 'text');
+  return textBlock ? textBlock.text : '';
+}
+
+/**
+ * Generic streaming agent call with configurable params.
+ * Used by the section writer agent for per-section streaming.
+ */
+async function agentStream(systemPrompt, userPrompt, onText, onDone, { maxTokens = 4000, temperature = 0.4 } = {}) {
+  const stream = client.messages.stream({
+    model: 'claude-sonnet-4-6',
+    max_tokens: maxTokens,
+    temperature,
+    system: systemPrompt,
+    messages: [{ role: 'user', content: userPrompt }],
+  });
+
+  stream.on('text', (text) => {
+    if (onText) onText(text);
+  });
+
+  const finalMessage = await stream.finalMessage();
+  const textBlock = finalMessage.content.find((block) => block.type === 'text');
+  const fullText = textBlock ? textBlock.text : '';
+  if (onDone) onDone(fullText);
+  return fullText;
+}
+
+module.exports = { sendMessage, streamMessage, parseDocumentContext, agentCall, agentStream, SYSTEM_PROMPT };

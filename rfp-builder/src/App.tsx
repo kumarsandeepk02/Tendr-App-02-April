@@ -68,6 +68,12 @@ function App() {
     handleStreamStart,
     handleStreamChunk,
     handleStreamDone,
+    // Pipeline
+    currentSection,
+    qualityReview,
+    handleSectionStart,
+    handleSectionDone,
+    handleReviewResult,
   } = useDocument(activeProjectId);
 
   // Chat options (memoized to prevent infinite re-renders)
@@ -82,9 +88,12 @@ function App() {
       onStreamStart: handleStreamStart,
       onStreamChunk: handleStreamChunk,
       onStreamDone: handleStreamDone,
+      onSectionStart: handleSectionStart,
+      onSectionDone: handleSectionDone,
+      onReviewResult: handleReviewResult,
       projectId: activeProjectId,
     }),
-    [parseSectionsFromMarkdown, updateMeta, handleStreamStart, handleStreamChunk, handleStreamDone, activeProjectId]
+    [parseSectionsFromMarkdown, updateMeta, handleStreamStart, handleStreamChunk, handleStreamDone, handleSectionStart, handleSectionDone, handleReviewResult, activeProjectId]
   );
 
   // Chat state
@@ -94,6 +103,10 @@ function App() {
     phase,
     isTyping,
     isGenerating,
+    gatheredAnswers,
+    uploadedFileText,
+    outlineSections,
+    isOutlineLoading,
     startFlow,
     sendMessage,
     skipCurrentStep,
@@ -101,6 +114,9 @@ function App() {
     handleScopeUpload,
     skipScopeUpload,
     triggerGenerate,
+    toggleOutlineSection,
+    approveOutline,
+    regenerateOutline,
     retryLast,
     restoreChat,
     resetChat,
@@ -151,7 +167,7 @@ function App() {
     // Save current project
     if (activeProjectId) {
       saveProject(activeProjectId, {
-        chatState: { messages, guidedStep, phase },
+        chatState: { messages, guidedStep, phase, gatheredAnswers, uploadedFileText, outlineSections },
         documentState,
         savedAt: Date.now(),
       });
@@ -161,14 +177,14 @@ function App() {
     resetDocument();
     flowStartedRef.current = false;
     setResetCounter((c) => c + 1);
-  }, [activeProjectId, messages, guidedStep, phase, documentState, saveProject, createProject, resetChat, resetDocument]);
+  }, [activeProjectId, messages, guidedStep, phase, gatheredAnswers, uploadedFileText, outlineSections, documentState, saveProject, createProject, resetChat, resetDocument]);
 
   const handleSelectProject = useCallback(
     (targetId: string) => {
       if (targetId === activeProjectId) return;
 
       const currentDraft = {
-        chatState: { messages, guidedStep, phase },
+        chatState: { messages, guidedStep, phase, gatheredAnswers, uploadedFileText, outlineSections },
         documentState,
         savedAt: Date.now(),
       };
@@ -190,7 +206,7 @@ function App() {
         setResetCounter((c) => c + 1);
       }
     },
-    [activeProjectId, messages, guidedStep, phase, documentState, switchProject, restoreChat, restoreDocument, resetChat, resetDocument]
+    [activeProjectId, messages, guidedStep, phase, gatheredAnswers, uploadedFileText, outlineSections, documentState, switchProject, restoreChat, restoreDocument, resetChat, resetDocument]
   );
 
   const handleDeleteProject = useCallback(
@@ -292,6 +308,9 @@ function App() {
             isGenerating={isGenerating}
             phase={phase}
             guidedStep={guidedStep}
+            outlineSections={outlineSections}
+            isOutlineLoading={isOutlineLoading}
+            currentSection={currentSection}
             onSendMessage={sendMessage}
             onRetry={retryLast}
             onFileUpload={() => setShowUploader(true)}
@@ -300,6 +319,9 @@ function App() {
             onScopeUpload={handleScopeUpload}
             onSkipScopeUpload={skipScopeUpload}
             onTriggerGenerate={triggerGenerate}
+            onToggleOutlineSection={toggleOutlineSection}
+            onApproveOutline={approveOutline}
+            onRegenerateOutline={regenerateOutline}
           />
         </div>
 
@@ -312,6 +334,8 @@ function App() {
               totalSections={totalSections}
               isStreaming={isStreaming}
               showPlaceholder={showPlaceholder}
+              currentSection={currentSection}
+              qualityReview={qualityReview}
               onUpdateSection={updateSection}
               onRemoveSection={removeSection}
               onAddSection={addSection}
