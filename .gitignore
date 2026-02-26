@@ -32,3 +32,4 @@ server/uploads/*
 
 # Claude dev config
 .claude/
+.vercel

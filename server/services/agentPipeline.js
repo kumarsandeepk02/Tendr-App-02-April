@@ -106,31 +106,36 @@ async function runPipeline(config, callbacks) {
     if (onDone) onDone(fullDocument.trim());
 
     // Phase 3: Quality Reviewer (async — fire and forget)
+    // NOTE: Always call the callback (with null on failure) so the route handler
+    // can decrement asyncPending via tryClose() and properly close the SSE connection.
     reviewDocument({ fullDocument, answers, docType, industryProfile: industry })
       .then((review) => {
-        if (review && onReview) onReview(review);
+        if (onReview) onReview(review || null);
       })
       .catch((err) => {
         console.warn('Quality review failed (non-critical):', err.message);
+        if (onReview) onReview(null);
       });
 
     // Phase 4: Competitive Intelligence (async — fire and forget)
     generateCompetitiveIntel({ docType, answers, industryProfile: industry })
       .then((intel) => {
-        if (intel && onCompetitiveIntel) onCompetitiveIntel(intel);
+        if (onCompetitiveIntel) onCompetitiveIntel(intel || null);
       })
       .catch((err) => {
         console.warn('Competitive intel failed (non-critical):', err.message);
+        if (onCompetitiveIntel) onCompetitiveIntel(null);
       });
 
     // Phase 5: Document Analysis — only if multiple documents uploaded
     if (uploadedDocuments && uploadedDocuments.length > 0 && completedSections.length > 0) {
       analyzeDocuments({ documents: uploadedDocuments, generatedSections: completedSections, docType, answers })
         .then((analysis) => {
-          if (analysis && onDocumentAnalysis) onDocumentAnalysis(analysis);
+          if (onDocumentAnalysis) onDocumentAnalysis(analysis || null);
         })
         .catch((err) => {
           console.warn('Document analysis failed (non-critical):', err.message);
+          if (onDocumentAnalysis) onDocumentAnalysis(null);
         });
     }
 

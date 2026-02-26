@@ -108,15 +108,21 @@ router.post('/pipeline', async (req, res) => {
           res.write(`data: ${JSON.stringify({ type: 'done', content: fullDocument })}\n\n`);
         },
         onReview: (reviewResult) => {
-          res.write(`data: ${JSON.stringify({ type: 'review', content: reviewResult })}\n\n`);
+          if (reviewResult && !res.writableEnded) {
+            res.write(`data: ${JSON.stringify({ type: 'review', content: reviewResult })}\n\n`);
+          }
           tryClose();
         },
         onCompetitiveIntel: (intelResult) => {
-          res.write(`data: ${JSON.stringify({ type: 'competitive_intel', content: intelResult })}\n\n`);
+          if (intelResult && !res.writableEnded) {
+            res.write(`data: ${JSON.stringify({ type: 'competitive_intel', content: intelResult })}\n\n`);
+          }
           tryClose();
         },
         onDocumentAnalysis: (analysisResult) => {
-          res.write(`data: ${JSON.stringify({ type: 'document_analysis', content: analysisResult })}\n\n`);
+          if (analysisResult && !res.writableEnded) {
+            res.write(`data: ${JSON.stringify({ type: 'document_analysis', content: analysisResult })}\n\n`);
+          }
           tryClose();
         },
         onError: (errorMessage) => {
