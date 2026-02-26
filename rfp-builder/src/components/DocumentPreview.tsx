@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
-import { DocumentState, DocumentSection, QualityReview, SectionProgress } from '../types';
+import { DocumentState, DocumentSection, QualityReview, SectionProgress, ReviewIssue, DocumentAnalysis, CompetitiveIntelligence } from '../types';
 import SectionCard from './SectionCard';
 import ProgressBar from './ProgressBar';
-import { Plus, FileText, Loader2, PenLine, ChevronDown, ChevronUp, X, AlertTriangle, AlertCircle, Info } from 'lucide-react';
+import DocumentAnalysisPanel from './DocumentAnalysisPanel';
+import CompetitiveIntelPanel from './CompetitiveIntelPanel';
+import { Plus, FileText, Loader2, PenLine, ChevronDown, ChevronUp, X, AlertTriangle, AlertCircle, Info, Wrench, CheckCircle2 } from 'lucide-react';
 import MasterEditor from './MasterEditor';
 
 interface DocumentPreviewProps {
@@ -17,11 +19,59 @@ interface DocumentPreviewProps {
   onRemoveSection: (id: string) => void;
   onAddSection: (title: string, content?: string) => void;
   onReorderSections: (sections: DocumentSection[]) => void;
+  // Section regeneration
+  regeneratingSectionId?: string | null;
+  onRegenerateSection?: (sectionId: string, sectionTitle: string, currentContent: string, instruction: string) => void;
+  previousSectionContent?: { id: string; content: string } | null;
+  onUndoRegeneration?: () => void;
+  // Copilot
+  onCopilotEdit?: (sectionId: string, sectionTitle: string, currentContent: string, instruction: string) => Promise<string | null>;
+  // Document analysis & competitive intel
+  documentAnalysis?: DocumentAnalysis | null;
+  competitiveIntel?: CompetitiveIntelligence | null;
+  onApplySuggestion?: (sectionId: string, sectionTitle: string, currentContent: string, instruction: string) => void;
+  // Quality review fix
+  onFixIssue?: (sectionTitle: string, issueMessage: string, sectionId: string, currentContent: string) => void;
+  fixingIssue?: { section: string; index: number } | null;
+  fixedIssues?: Set<number>;
+  findSectionByTitle?: (title: string) => DocumentSection | undefined;
+  onFixAllErrors?: (
+    issues: Array<{ section: string; message: string; sectionId: string; currentContent: string }>,
+    onFixStart?: (section: string, index: number) => void,
+    onFixDone?: () => void
+  ) => void;
+  onFixStart?: (section: string, index: number) => void;
+  onFixDone?: (index: number) => void;
 }
 
 // Quality Review Panel
-const QualityReviewPanel: React.FC<{ review: QualityReview; onDismiss: () => void }> = ({ review, onDismiss }) => {
+const QualityReviewPanel: React.FC<{
+  review: QualityReview;
+  onDismiss: () => void;
+  onFixIssue?: (sectionTitle: string, issueMessage: string, sectionId: string, currentContent: string) => void;
+  fixingIssue?: { section: string; index: number } | null;
+  fixedIssues?: Set<number>;
+  findSectionByTitle?: (title: string) => DocumentSection | undefined;
+  onFixAllErrors?: (
+    issues: Array<{ section: string; message: string; sectionId: string; currentContent: string }>,
+    onFixStart?: (section: string, index: number) => void,
+    onFixDone?: () => void
+  ) => void;
+  onFixStart?: (section: string, index: number) => void;
+  onFixDone?: (index: number) => void;
+}> = ({
+  review,
+  onDismiss,
+  onFixIssue,
+  fixingIssue,
+  fixedIssues = new Set(),
+  findSectionByTitle,
+  onFixAllErrors,
+  onFixStart,
+  onFixDone,
+}) => {
   const [isExpanded, setIsExpanded] = useState(true);
+  const [isFixingAll, setIsFixingAll] = useState(false);
 
   const scoreColor = review.score >= 80 ? 'bg-green-500' : review.score >= 60 ? 'bg-yellow-500' : 'bg-red-500';
   const scoreTextColor = review.score >= 80 ? 'text-green-700' : review.score >= 60 ? 'text-yellow-700' : 'text-red-700';
@@ -38,6 +88,51 @@ const QualityReviewPanel: React.FC<{ review: QualityReview; onDismiss: () => voi
       default: return <Info size={14} className="text-blue-500 flex-shrink-0" />;
     }
   };
+
+  const handleFixIssue = (issue: ReviewIssue, index: number) => {
+    if (!onFixIssue || !findSectionByTitle) return;
+    const section = findSectionByTitle(issue.section);
+    if (!section) return;
+    onFixStart?.(issue.section, index);
+    onFixIssue(issue.section, issue.message, section.id, section.content);
+    // The fix completion is handled by the regeneration callback chain
+    // onFixDone will be called after onSectionRegenerationDone fires
+  };
+
+  const handleFixAll = async () => {
+    if (!onFixAllErrors || !findSectionByTitle || !onFixStart || !onFixDone) return;
+    setIsFixingAll(true);
+
+    const errorIssues = review.issues
+      .map((issue, idx) => ({ ...issue, originalIndex: idx }))
+      .filter((issue) => issue.severity === 'error' && !fixedIssues.has(issue.originalIndex));
+
+    const issuesWithSections = errorIssues
+      .map((issue) => {
+        const section = findSectionByTitle(issue.section);
+        if (!section) return null;
+        return {
+          section: issue.section,
+          message: issue.message,
+          sectionId: section.id,
+          currentContent: section.content,
+        };
+      })
+      .filter(Boolean) as Array<{ section: string; message: string; sectionId: string; currentContent: string }>;
+
+    if (issuesWithSections.length > 0) {
+      await onFixAllErrors(
+        issuesWithSections,
+        (section, i) => onFixStart(section, i),
+        () => {}
+      );
+    }
+    setIsFixingAll(false);
+  };
+
+  const hasUnfixedErrors = review.issues.some(
+    (issue, idx) => issue.severity === 'error' && !fixedIssues.has(idx)
+  );
 
   return (
     <div className="mx-4 mb-4 border border-gray-200 rounded-lg overflow-hidden animate-in slide-in-from-top-4">
@@ -59,6 +154,21 @@ const QualityReviewPanel: React.FC<{ review: QualityReview; onDismiss: () => voi
           </div>
         </div>
         <div className="flex items-center gap-1">
+          {/* Fix All Errors button */}
+          {onFixAllErrors && hasUnfixedErrors && (
+            <button
+              onClick={handleFixAll}
+              disabled={!!fixingIssue || isFixingAll}
+              className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-red-700 bg-red-100 hover:bg-red-200 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed mr-1"
+            >
+              {isFixingAll ? (
+                <Loader2 size={12} className="animate-spin" />
+              ) : (
+                <Wrench size={12} />
+              )}
+              Fix All Errors
+            </button>
+          )}
           <button
             onClick={() => setIsExpanded(!isExpanded)}
             className="p-1 text-gray-400 hover:text-gray-600 transition-colors"
@@ -82,15 +192,44 @@ const QualityReviewPanel: React.FC<{ review: QualityReview; onDismiss: () => voi
             <div className="px-4 py-3">
               <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Issues</p>
               <div className="space-y-2">
-                {review.issues.map((issue, i) => (
-                  <div key={i} className="flex items-start gap-2">
-                    {severityIcon(issue.severity)}
-                    <div className="min-w-0">
-                      <span className="text-xs font-medium text-gray-700">{issue.section}:</span>{' '}
-                      <span className="text-xs text-gray-600">{issue.message}</span>
+                {review.issues.map((issue, i) => {
+                  const isFixed = fixedIssues.has(i);
+                  const isCurrentlyFixing = fixingIssue?.section === issue.section && fixingIssue?.index === i;
+
+                  return (
+                    <div key={i} className={`flex items-start gap-2 ${isFixed ? 'opacity-60' : ''}`}>
+                      {isFixed ? (
+                        <CheckCircle2 size={14} className="text-green-500 flex-shrink-0 mt-0.5" />
+                      ) : (
+                        severityIcon(issue.severity)
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <span className={`text-xs font-medium text-gray-700 ${isFixed ? 'line-through' : ''}`}>
+                          {issue.section}:
+                        </span>{' '}
+                        <span className={`text-xs text-gray-600 ${isFixed ? 'line-through' : ''}`}>
+                          {issue.message}
+                        </span>
+                      </div>
+                      {/* Fix button */}
+                      {onFixIssue && findSectionByTitle && !isFixed && (
+                        <button
+                          onClick={() => handleFixIssue(issue, i)}
+                          disabled={!!fixingIssue || isFixingAll}
+                          className="flex items-center gap-1 px-2 py-0.5 text-xs text-indigo-600 hover:bg-indigo-50 rounded transition-colors flex-shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
+                          title={`Fix: ${issue.message}`}
+                        >
+                          {isCurrentlyFixing ? (
+                            <Loader2 size={10} className="animate-spin" />
+                          ) : (
+                            <Wrench size={10} />
+                          )}
+                          Fix
+                        </button>
+                      )}
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
@@ -144,7 +283,7 @@ const GeneratingPlaceholder: React.FC = () => (
       Your document is being created...
     </h3>
     <p className="text-sm text-gray-500 text-center max-w-xs">
-      Sections will appear here as they're generated. This usually takes 15–30 seconds.
+      Sections will appear here as they're generated. This usually takes 15-30 seconds.
     </p>
     {/* Shimmer skeleton */}
     <div className="w-full max-w-md mt-8 space-y-4">
@@ -168,11 +307,32 @@ const DocumentPreview: React.FC<DocumentPreviewProps> = ({
   onRemoveSection,
   onAddSection,
   onReorderSections,
+  // Section regeneration
+  regeneratingSectionId,
+  onRegenerateSection,
+  previousSectionContent,
+  onUndoRegeneration,
+  // Copilot
+  onCopilotEdit,
+  // Document analysis & competitive intel
+  documentAnalysis,
+  competitiveIntel,
+  onApplySuggestion,
+  // Quality review fix
+  onFixIssue,
+  fixingIssue,
+  fixedIssues = new Set(),
+  findSectionByTitle,
+  onFixAllErrors,
+  onFixStart,
+  onFixDone,
 }) => {
   const [newSectionTitle, setNewSectionTitle] = useState('');
   const [isAddingSection, setIsAddingSection] = useState(false);
   const [showMasterEditor, setShowMasterEditor] = useState(false);
   const [reviewDismissed, setReviewDismissed] = useState(false);
+  const [analysisDismissed, setAnalysisDismissed] = useState(false);
+  const [intelDismissed, setIntelDismissed] = useState(false);
 
   const handleAddSection = () => {
     if (newSectionTitle.trim()) {
@@ -255,6 +415,33 @@ const DocumentPreview: React.FC<DocumentPreviewProps> = ({
         <QualityReviewPanel
           review={qualityReview}
           onDismiss={() => setReviewDismissed(true)}
+          onFixIssue={onFixIssue}
+          fixingIssue={fixingIssue}
+          fixedIssues={fixedIssues}
+          findSectionByTitle={findSectionByTitle}
+          onFixAllErrors={onFixAllErrors}
+          onFixStart={onFixStart}
+          onFixDone={onFixDone}
+        />
+      )}
+
+      {/* Document Analysis Panel */}
+      {documentAnalysis && !isStreaming && !analysisDismissed && (
+        <DocumentAnalysisPanel
+          analysis={documentAnalysis}
+          onDismiss={() => setAnalysisDismissed(true)}
+          onApplySuggestion={onApplySuggestion}
+          findSectionByTitle={findSectionByTitle}
+        />
+      )}
+
+      {/* Competitive Intelligence Panel */}
+      {competitiveIntel && !isStreaming && !intelDismissed && (
+        <CompetitiveIntelPanel
+          intel={competitiveIntel}
+          onDismiss={() => setIntelDismissed(true)}
+          onApplySuggestion={onApplySuggestion}
+          findSectionByTitle={findSectionByTitle}
         />
       )}
 
@@ -263,7 +450,7 @@ const DocumentPreview: React.FC<DocumentPreviewProps> = ({
         {/* Generating Placeholder */}
         {showPlaceholder && <GeneratingPlaceholder />}
 
-        {/* Empty state — no document yet */}
+        {/* Empty state -- no document yet */}
         {!showPlaceholder && !hasAnySections && !isStreaming && (
           <div className="flex flex-col items-center justify-center h-full text-center">
             <div className="text-4xl mb-4">📝</div>
@@ -302,7 +489,7 @@ const DocumentPreview: React.FC<DocumentPreviewProps> = ({
           </div>
         )}
 
-        {/* Section Cards — only non-empty */}
+        {/* Section Cards -- only non-empty */}
         {!showPlaceholder &&
           nonEmptySections.map((section, index) => (
             <SectionCard
@@ -310,8 +497,16 @@ const DocumentPreview: React.FC<DocumentPreviewProps> = ({
               section={section}
               isStreaming={isStreaming}
               isLastSection={index === nonEmptySections.length - 1}
+              isRegenerating={regeneratingSectionId === section.id}
+              showUndo={
+                previousSectionContent?.id === section.id &&
+                regeneratingSectionId === null
+              }
               onUpdate={onUpdateSection}
               onRemove={onRemoveSection}
+              onRegenerate={onRegenerateSection}
+              onUndo={onUndoRegeneration}
+              onCopilotEdit={onCopilotEdit}
             />
           ))}
 

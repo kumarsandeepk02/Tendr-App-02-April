@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { DocumentState, DocumentSection, QualityReview, SectionProgress } from '../types';
+import { DocumentState, DocumentSection, QualityReview, SectionProgress, DocumentAnalysis, CompetitiveIntelligence } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 
 function createInitialState(): DocumentState {
@@ -25,7 +25,17 @@ export function useDocument(projectId?: string | null) {
   const [showPlaceholder, setShowPlaceholder] = useState(false);
   const [currentSection, setCurrentSection] = useState<SectionProgress | null>(null);
   const [qualityReview, setQualityReview] = useState<QualityReview | null>(null);
+  const [documentAnalysis, setDocumentAnalysis] = useState<DocumentAnalysis | null>(null);
+  const [competitiveIntel, setCompetitiveIntel] = useState<CompetitiveIntelligence | null>(null);
   const streamBufferRef = useRef('');
+
+  // --- Section Regeneration State ---
+  const [regeneratingSectionId, setRegeneratingSectionId] = useState<string | null>(null);
+  const [previousSectionContent, setPreviousSectionContent] = useState<{ id: string; content: string } | null>(null);
+
+  // --- Quality Review Fix State ---
+  const [fixingIssue, setFixingIssue] = useState<{ section: string; index: number } | null>(null);
+  const [fixedIssues, setFixedIssues] = useState<Set<number>>(new Set());
 
   // Autosave on every change (skip during streaming to avoid thrashing)
   useEffect(() => {
@@ -167,6 +177,8 @@ export function useDocument(projectId?: string | null) {
     setShowPlaceholder(true);
     setCurrentSection(null);
     setQualityReview(null);
+    setDocumentAnalysis(null);
+    setCompetitiveIntel(null);
     streamBufferRef.current = '';
     // Clear all sections for fresh streamed content
     setDocumentState((prev) => ({
@@ -267,6 +279,16 @@ export function useDocument(projectId?: string | null) {
     setQualityReview(review);
   }, []);
 
+  // Called when document analysis completes (pipeline mode, async)
+  const handleDocumentAnalysis = useCallback((analysis: DocumentAnalysis) => {
+    setDocumentAnalysis(analysis);
+  }, []);
+
+  // Called when competitive intel arrives (pipeline mode, async)
+  const handleCompetitiveIntel = useCallback((intel: CompetitiveIntelligence) => {
+    setCompetitiveIntel(intel);
+  }, []);
+
   // Called when streaming is done
   const handleStreamDone = useCallback((fullText: string) => {
     setIsStreaming(false);
@@ -314,12 +336,110 @@ export function useDocument(projectId?: string | null) {
     }
   }, []);
 
+  // --- Section Regeneration Handlers ---
+
+  /** Called when section regeneration starts — save current content for undo */
+  const handleSectionRegenerationStart = useCallback(
+    (sectionId: string) => {
+      const section = documentState.sections.find((s) => s.id === sectionId);
+      if (section) {
+        setPreviousSectionContent({ id: sectionId, content: section.content });
+      }
+      setRegeneratingSectionId(sectionId);
+    },
+    [documentState.sections]
+  );
+
+  /** Called when section regeneration completes — update section content */
+  const handleSectionRegenerationDone = useCallback(
+    (sectionId: string, content: string) => {
+      setRegeneratingSectionId(null);
+      // Update the section with new content
+      setDocumentState((prev) => ({
+        ...prev,
+        meta: { ...prev.meta, updatedAt: Date.now() },
+        sections: prev.sections.map((s) =>
+          s.id === sectionId ? { ...s, content } : s
+        ),
+      }));
+      // If we were fixing an issue, mark it as done
+      setFixingIssue((current) => {
+        if (current) {
+          setFixedIssues((prev) => new Set(prev).add(current.index));
+        }
+        return null;
+      });
+    },
+    []
+  );
+
+  /** Undo the last regeneration — restore previous content */
+  const undoRegeneration = useCallback(() => {
+    if (previousSectionContent) {
+      setDocumentState((prev) => ({
+        ...prev,
+        meta: { ...prev.meta, updatedAt: Date.now() },
+        sections: prev.sections.map((s) =>
+          s.id === previousSectionContent.id
+            ? { ...s, content: previousSectionContent.content }
+            : s
+        ),
+      }));
+      setPreviousSectionContent(null);
+    }
+  }, [previousSectionContent]);
+
+  // --- Quality Review Fix Handlers ---
+
+  /** Mark a fix as started */
+  const handleFixStart = useCallback((section: string, index: number) => {
+    setFixingIssue({ section, index });
+  }, []);
+
+  /** Mark a fix as done — add to fixed issues set */
+  const handleFixDone = useCallback((index: number) => {
+    setFixingIssue(null);
+    setFixedIssues((prev) => new Set(prev).add(index));
+  }, []);
+
+  // Reset fixedIssues when qualityReview changes
+  useEffect(() => {
+    setFixedIssues(new Set());
+  }, [qualityReview]);
+
+  // --- Section Lookup Helper ---
+
+  /** Find a section by title (fuzzy match using includes/startsWith) */
+  const findSectionByTitle = useCallback(
+    (title: string): DocumentSection | undefined => {
+      const normalizedTitle = title.toLowerCase().trim();
+      return (
+        documentState.sections.find(
+          (s) => s.title.toLowerCase().trim() === normalizedTitle
+        ) ||
+        documentState.sections.find((s) =>
+          s.title.toLowerCase().trim().includes(normalizedTitle)
+        ) ||
+        documentState.sections.find((s) =>
+          normalizedTitle.includes(s.title.toLowerCase().trim())
+        )
+      );
+    },
+    [documentState.sections]
+  );
+
   const resetDocument = useCallback(() => {
     setDocumentState(createInitialState());
     setIsStreaming(false);
     setShowPlaceholder(false);
     setCurrentSection(null);
     setQualityReview(null);
+    setDocumentAnalysis(null);
+    setCompetitiveIntel(null);
+    setRegeneratingSectionId(null);
+    setPreviousSectionContent(null);
+    setFixingIssue(null);
+    setFixedIssues(new Set());
     streamBufferRef.current = '';
   }, []);
 
@@ -353,8 +473,25 @@ export function useDocument(projectId?: string | null) {
     // Pipeline
     currentSection,
     qualityReview,
+    documentAnalysis,
+    competitiveIntel,
     handleSectionStart,
     handleSectionDone,
     handleReviewResult,
+    handleDocumentAnalysis,
+    handleCompetitiveIntel,
+    // Section regeneration
+    regeneratingSectionId,
+    previousSectionContent,
+    handleSectionRegenerationStart,
+    handleSectionRegenerationDone,
+    undoRegeneration,
+    // Quality review fix
+    fixingIssue,
+    fixedIssues,
+    handleFixStart,
+    handleFixDone,
+    // Helpers
+    findSectionByTitle,
   };
 }

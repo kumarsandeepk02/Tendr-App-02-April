@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import axios from 'axios';
-import { ChatMessage, GuidedStep, ChatRole, UnifiedFlowPhase, OutlineSection, QualityReview } from '../types';
+import { ChatMessage, GuidedStep, ChatRole, UnifiedFlowPhase, OutlineSection, QualityReview, UploadedDocument, DocumentAnalysis, CompetitiveIntelligence } from '../types';
 import {
   GUIDED_QUESTIONS,
   WELCOME_MESSAGE,
@@ -9,6 +9,8 @@ import {
   buildGenerationSystemPrompt,
   buildGenerationPrompt,
   buildOutlinePrompt,
+  buildAdaptiveQuestionPrompt,
+  ADAPTIVE_STEPS,
 } from '../utils/prompts';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
@@ -28,6 +30,10 @@ interface UseChatOptions {
   onSectionStart?: (title: string, index: number, total: number) => void;
   onSectionDone?: (title: string, content: string) => void;
   onReviewResult?: (review: QualityReview) => void;
+  onDocumentAnalysis?: (analysis: DocumentAnalysis) => void;
+  onCompetitiveIntel?: (intel: CompetitiveIntelligence) => void;
+  onSectionRegenerationStart?: (sectionId: string) => void;
+  onSectionRegenerationDone?: (sectionId: string, content: string) => void;
   projectId?: string | null;
 }
 
@@ -40,6 +46,7 @@ export function useChat(options?: UseChatOptions) {
   const [isGenerating, setIsGenerating] = useState(false);
   const [gatheredAnswers, setGatheredAnswers] = useState<Record<string, string>>({});
   const [uploadedFileText, setUploadedFileText] = useState<string>('');
+  const [uploadedDocuments, setUploadedDocuments] = useState<UploadedDocument[]>([]);
   const [outlineSections, setOutlineSections] = useState<OutlineSection[]>([]);
   const [isOutlineLoading, setIsOutlineLoading] = useState(false);
   const fileContextRef = useRef<string | undefined>(undefined);
@@ -60,7 +67,12 @@ export function useChat(options?: UseChatOptions) {
         const truncatedFileText = uploadedFileText.length > 10000
           ? uploadedFileText.substring(0, 10000)
           : uploadedFileText;
-        draft.chatState = { messages, guidedStep, phase, gatheredAnswers, uploadedFileText: truncatedFileText, outlineSections };
+        // Truncate each uploaded document text to save space
+        const truncatedDocs = uploadedDocuments.map((d) => ({
+          ...d,
+          text: d.text.length > 10000 ? d.text.substring(0, 10000) : d.text,
+        }));
+        draft.chatState = { messages, guidedStep, phase, gatheredAnswers, uploadedFileText: truncatedFileText, uploadedDocuments: truncatedDocs, outlineSections };
         draft.savedAt = Date.now();
         window.localStorage.setItem(storageKey, JSON.stringify(draft));
       } catch (e) {
@@ -68,7 +80,7 @@ export function useChat(options?: UseChatOptions) {
       }
     }, 500);
     return () => clearTimeout(timeout);
-  }, [messages, guidedStep, phase, gatheredAnswers, uploadedFileText, outlineSections]);
+  }, [messages, guidedStep, phase, gatheredAnswers, uploadedFileText, uploadedDocuments, outlineSections]);
 
   const addMessage = useCallback(
     (role: ChatRole, content: string, extra?: Partial<ChatMessage>) => {
@@ -151,6 +163,24 @@ export function useChat(options?: UseChatOptions) {
     [guidedStep]
   );
 
+  // Generate a contextual follow-up question using Claude (for adaptive Q&A)
+  const generateAdaptiveQuestion = useCallback(
+    async (nextStep: GuidedStep): Promise<string | null> => {
+      try {
+        const prompt = buildAdaptiveQuestionPrompt(nextStep, gatheredAnswers);
+        const res = await axios.post(`${API_URL}/api/chat`, {
+          messages: [{ role: 'user', content: prompt }],
+          systemPrompt: 'You are helping a user build a procurement document. Generate exactly ONE contextual follow-up question. Output ONLY the question text, nothing else. Use **bold** for key terms. Max 2 sentences.',
+        });
+        const question = res.data.content?.trim();
+        return question && question.length > 10 ? question : null;
+      } catch {
+        return null;
+      }
+    },
+    [gatheredAnswers]
+  );
+
   // Advance to the next guided step (or transition to upload_prompt if done)
   const advanceStep = useCallback(
     (currentStep: GuidedStep) => {
@@ -168,9 +198,20 @@ export function useChat(options?: UseChatOptions) {
           }, 400);
         } else {
           setGuidedStep(nextStep);
-          setTimeout(() => {
-            addMessage('assistant', GUIDED_QUESTIONS[nextStep]);
-          }, 400);
+
+          // Use adaptive questions for context-sensitive steps
+          if (ADAPTIVE_STEPS.has(nextStep)) {
+            setIsTyping(true);
+            generateAdaptiveQuestion(nextStep).then((adaptiveQ) => {
+              setIsTyping(false);
+              const questionText = adaptiveQ || GUIDED_QUESTIONS[nextStep];
+              addMessage('assistant', questionText);
+            });
+          } else {
+            setTimeout(() => {
+              addMessage('assistant', GUIDED_QUESTIONS[nextStep]);
+            }, 400);
+          }
         }
       } else {
         // No more steps
@@ -184,7 +225,7 @@ export function useChat(options?: UseChatOptions) {
         }, 400);
       }
     },
-    [addMessage]
+    [addMessage, generateAdaptiveQuestion]
   );
 
   // Send user message (answer to a guided question)
@@ -247,28 +288,62 @@ export function useChat(options?: UseChatOptions) {
     }, 200);
   }, [guidedStep, addMessage, advanceStep]);
 
-  // Handle scope document upload at upload_scope step
+  // Handle scope document upload at upload_scope step (supports multiple uploads)
   const handleScopeUpload = useCallback(
-    (fileText: string) => {
-      setUploadedFileText(fileText);
-      addMessage('user', '📄 *(Uploaded a scope document)*');
+    (fileText: string, fileName?: string) => {
+      // Append to uploadedDocuments array
+      const newDoc: UploadedDocument = {
+        id: generateId(),
+        name: fileName || `Document ${uploadedDocuments.length + 1}`,
+        text: fileText,
+        uploadedAt: Date.now(),
+      };
+      setUploadedDocuments((prev) => [...prev, newDoc]);
 
-      setTimeout(() => {
-        addMessage(
-          'assistant',
-          "Great, I've read your document! I'll use it to generate more relevant sections and questions. Let's continue with a few more details."
-        );
-        // Advance past upload_scope to requirements
-        const nextStep = getNextGuidedStep('upload_scope');
-        if (nextStep) {
-          setGuidedStep(nextStep);
-          setTimeout(() => {
-            addMessage('assistant', GUIDED_QUESTIONS[nextStep]);
-          }, 400);
-        }
-      }, 300);
+      // Also update combined uploadedFileText for backward compatibility
+      setUploadedFileText((prev) => {
+        const separator = prev ? '\n\n---\n\n' : '';
+        return prev + separator + fileText;
+      });
+
+      addMessage('user', `📄 *(Uploaded: ${newDoc.name})*`);
+
+      // Only advance from upload_scope on the first upload
+      if (uploadedDocuments.length === 0) {
+        setTimeout(() => {
+          addMessage(
+            'assistant',
+            "Great, I've read your document! I'll use it to generate more relevant sections and questions. You can upload more documents, or let's continue."
+          );
+          // Advance past upload_scope to requirements
+          const nextStep = getNextGuidedStep('upload_scope');
+          if (nextStep) {
+            setGuidedStep(nextStep);
+            setTimeout(() => {
+              addMessage('assistant', GUIDED_QUESTIONS[nextStep]);
+            }, 400);
+          }
+        }, 300);
+      } else {
+        setTimeout(() => {
+          addMessage('assistant', `Got it! I've added "${newDoc.name}" to your reference documents (${uploadedDocuments.length + 1} total).`);
+        }, 300);
+      }
     },
-    [addMessage]
+    [addMessage, uploadedDocuments]
+  );
+
+  // Remove a specific uploaded document
+  const removeUploadedDocument = useCallback(
+    (docId: string) => {
+      setUploadedDocuments((prev) => {
+        const updated = prev.filter((d) => d.id !== docId);
+        // Rebuild combined file text
+        setUploadedFileText(updated.map((d) => d.text).join('\n\n---\n\n'));
+        return updated;
+      });
+    },
+    []
   );
 
   // Skip scope upload step
@@ -329,6 +404,10 @@ export function useChat(options?: UseChatOptions) {
               optionsRef.current?.onSectionDone?.(parsed.title, parsed.content);
             } else if (usePipeline && parsed.type === 'review') {
               optionsRef.current?.onReviewResult?.(parsed.content);
+            } else if (usePipeline && parsed.type === 'document_analysis') {
+              optionsRef.current?.onDocumentAnalysis?.(parsed.content);
+            } else if (usePipeline && parsed.type === 'competitive_intel') {
+              optionsRef.current?.onCompetitiveIntel?.(parsed.content);
             }
           } catch (parseErr: any) {
             if (parseErr.message && parseErr.message !== 'Unexpected end of JSON input') {
@@ -392,6 +471,7 @@ export function useChat(options?: UseChatOptions) {
           fileContext,
           docType,
           confirmedSections,
+          uploadedDocuments: uploadedDocuments.map((d) => ({ name: d.name, text: d.text })),
         }),
       });
 
@@ -401,7 +481,7 @@ export function useChat(options?: UseChatOptions) {
 
       await readSSEStream(response, true);
     },
-    [gatheredAnswers, readSSEStream]
+    [gatheredAnswers, uploadedDocuments, readSSEStream]
   );
 
   // Stream-based generation — uses pipeline or monolithic based on feature flag
@@ -555,6 +635,202 @@ export function useChat(options?: UseChatOptions) {
     generateOutline(fileContextRef.current);
   }, [generateOutline]);
 
+  // --- Section Regeneration ---
+
+  /**
+   * Regenerate a single document section by streaming from the backend.
+   * Shared by both section-level regen (Feature 1) and quality review fix (Feature 3).
+   */
+  const regenerateSection = useCallback(
+    async (
+      sectionId: string,
+      sectionTitle: string,
+      currentContent: string,
+      instruction: string
+    ) => {
+      const docType = gatheredAnswers.doc_type?.toUpperCase().includes('RFI') ? 'RFI' : 'RFP';
+
+      // Notify start
+      optionsRef.current?.onSectionRegenerationStart?.(sectionId);
+
+      try {
+        const response = await fetch(`${API_URL}/api/chat/regenerate-section`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sectionTitle,
+            currentContent,
+            instruction,
+            docType,
+            answers: gatheredAnswers,
+            fileContext: uploadedFileText || undefined,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error('Regeneration request failed');
+        }
+
+        const reader = response.body?.getReader();
+        if (!reader) throw new Error('No readable stream');
+
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let fullText = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              try {
+                const parsed = JSON.parse(line.slice(6));
+                if (parsed.type === 'text') {
+                  fullText += parsed.content;
+                } else if (parsed.type === 'done') {
+                  fullText = parsed.content;
+                } else if (parsed.type === 'error') {
+                  throw new Error(parsed.content);
+                }
+              } catch (parseErr: any) {
+                if (parseErr.message && !parseErr.message.includes('Unexpected end of JSON input')) {
+                  throw parseErr;
+                }
+              }
+            }
+          }
+        }
+
+        // Notify done with the full regenerated text
+        optionsRef.current?.onSectionRegenerationDone?.(sectionId, fullText);
+        return fullText;
+      } catch (err: any) {
+        console.error('Section regeneration failed:', err);
+        setError(err.message || 'Section regeneration failed');
+        // Clear regeneration state on error
+        optionsRef.current?.onSectionRegenerationDone?.(sectionId, currentContent);
+        return null;
+      }
+    },
+    [gatheredAnswers, uploadedFileText]
+  );
+
+  /**
+   * Copilot edit: same backend as regenerateSection, but does NOT trigger
+   * the regeneration overlay. Returns the new content string directly
+   * so the caller can put it into the textarea buffer.
+   */
+  const copilotEdit = useCallback(
+    async (
+      sectionId: string,
+      sectionTitle: string,
+      currentContent: string,
+      instruction: string
+    ): Promise<string | null> => {
+      const docType = gatheredAnswers.doc_type?.toUpperCase().includes('RFI') ? 'RFI' : 'RFP';
+
+      try {
+        const response = await fetch(`${API_URL}/api/chat/regenerate-section`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sectionTitle,
+            currentContent,
+            instruction,
+            docType,
+            answers: gatheredAnswers,
+            fileContext: uploadedFileText || undefined,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error('Copilot edit request failed');
+        }
+
+        const reader = response.body?.getReader();
+        if (!reader) throw new Error('No readable stream');
+
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let fullText = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              try {
+                const parsed = JSON.parse(line.slice(6));
+                if (parsed.type === 'text') {
+                  fullText += parsed.content;
+                } else if (parsed.type === 'done') {
+                  fullText = parsed.content;
+                } else if (parsed.type === 'error') {
+                  throw new Error(parsed.content);
+                }
+              } catch (parseErr: any) {
+                if (parseErr.message && !parseErr.message.includes('Unexpected end of JSON input')) {
+                  throw parseErr;
+                }
+              }
+            }
+          }
+        }
+
+        return fullText;
+      } catch (err: any) {
+        console.error('Copilot edit failed:', err);
+        return null;
+      }
+    },
+    [gatheredAnswers, uploadedFileText]
+  );
+
+  /**
+   * Fix a specific quality review issue by regenerating the target section.
+   */
+  const fixIssue = useCallback(
+    async (
+      sectionTitle: string,
+      issueMessage: string,
+      sectionId: string,
+      currentContent: string
+    ) => {
+      const instruction = `Fix this issue: ${issueMessage}`;
+      return regenerateSection(sectionId, sectionTitle, currentContent, instruction);
+    },
+    [regenerateSection]
+  );
+
+  /**
+   * Fix all error-severity issues sequentially.
+   */
+  const fixAllErrors = useCallback(
+    async (
+      issues: Array<{ section: string; message: string; sectionId: string; currentContent: string }>,
+      onFixStart?: (section: string, index: number) => void,
+      onFixDone?: () => void
+    ) => {
+      for (let i = 0; i < issues.length; i++) {
+        const issue = issues[i];
+        onFixStart?.(issue.section, i);
+        await fixIssue(issue.section, issue.message, issue.sectionId, issue.currentContent);
+        onFixDone?.();
+      }
+    },
+    [fixIssue]
+  );
+
   const retryLast = useCallback(async () => {
     const nonErrorMessages = messages.filter((m) => !m.isError);
     setMessages(nonErrorMessages);
@@ -568,6 +844,7 @@ export function useChat(options?: UseChatOptions) {
       phase: UnifiedFlowPhase;
       gatheredAnswers?: Record<string, string>;
       uploadedFileText?: string;
+      uploadedDocuments?: UploadedDocument[];
       outlineSections?: OutlineSection[];
     }) => {
       setMessages(state.messages);
@@ -575,6 +852,7 @@ export function useChat(options?: UseChatOptions) {
       setPhase(state.phase || 'questions');
       setGatheredAnswers(state.gatheredAnswers || {});
       setUploadedFileText(state.uploadedFileText || '');
+      setUploadedDocuments(state.uploadedDocuments || []);
       setOutlineSections(state.outlineSections || []);
     },
     []
@@ -587,6 +865,7 @@ export function useChat(options?: UseChatOptions) {
     setError(null);
     setGatheredAnswers({});
     setUploadedFileText('');
+    setUploadedDocuments([]);
     setOutlineSections([]);
     setIsGenerating(false);
     setIsOutlineLoading(false);
@@ -602,6 +881,8 @@ export function useChat(options?: UseChatOptions) {
     isGenerating,
     gatheredAnswers,
     uploadedFileText,
+    uploadedDocuments,
+    removeUploadedDocument,
     outlineSections,
     isOutlineLoading,
     startFlow,
@@ -617,5 +898,10 @@ export function useChat(options?: UseChatOptions) {
     retryLast,
     restoreChat,
     resetChat,
+    // Section regeneration & quality fix
+    regenerateSection,
+    copilotEdit,
+    fixIssue,
+    fixAllErrors,
   };
 }

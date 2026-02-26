@@ -238,6 +238,62 @@ export function buildGenerationPrompt(
   return prompt;
 }
 
+// ===================== Adaptive Q&A =====================
+
+/**
+ * Map of guided steps to topic descriptions for adaptive question generation.
+ */
+export const STEP_TOPIC_MAP: Record<string, string> = {
+  upload_scope: 'existing scope documents, SOWs, project briefs, or reference materials that could inform the procurement document',
+  requirements: 'key requirements, specifications, and mandatory capabilities that vendors/suppliers must meet',
+  evaluation_criteria: 'how vendor responses will be evaluated, scored, and ranked — including weighting and methodology',
+  deadline: 'submission timeline, key milestone dates, and any phased delivery expectations',
+  additional_sections: 'any additional sections, special requirements, compliance needs, or industry-specific content to include',
+};
+
+/**
+ * Set of guided steps that use adaptive (AI-generated) follow-up questions
+ * instead of static hardcoded questions. Steps 1-3 (doc_type, project_title,
+ * project_description) remain static since they are structural.
+ */
+export const ADAPTIVE_STEPS: Set<GuidedStep> = new Set<GuidedStep>([
+  'requirements',
+  'evaluation_criteria',
+  'deadline',
+  'additional_sections',
+]);
+
+/**
+ * Build a prompt that asks Claude to generate a contextual follow-up question
+ * based on what the user has already told us.
+ */
+export function buildAdaptiveQuestionPrompt(
+  nextStep: GuidedStep,
+  gatheredAnswers: Record<string, string>
+): string {
+  const topicDescription = STEP_TOPIC_MAP[nextStep] || nextStep;
+  const docType = gatheredAnswers.doc_type?.toUpperCase().includes('RFI') ? 'RFI' : 'RFP';
+
+  let prompt = `You are helping a user build a ${docType} procurement document. Based on what they've told you so far, generate ONE contextual follow-up question.\n\n`;
+
+  prompt += `**What we know so far:**\n`;
+  const entries = Object.entries(gatheredAnswers);
+  if (entries.length > 0) {
+    for (const [key, value] of entries) {
+      if (value && value !== '*(Skipped)*') {
+        prompt += `- ${key}: ${value}\n`;
+      }
+    }
+  } else {
+    prompt += `- (No answers yet)\n`;
+  }
+
+  prompt += `\n**Next topic area:** ${topicDescription}\n\n`;
+  prompt += `Generate exactly ONE focused, conversational question about this topic. If the user's previous answers mention specific industries, technologies, or project details, reference them to make the question contextual. Use **bold** for key terms. Keep it to 1-2 sentences max.\n\nOutput ONLY the question text, nothing else.`;
+
+  return prompt;
+}
+
 // ===================== Outline Prompt =====================
 
 /**

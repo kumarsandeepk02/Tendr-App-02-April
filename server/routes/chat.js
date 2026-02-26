@@ -2,6 +2,9 @@ const express = require('express');
 const router = express.Router();
 const { sendMessage, streamMessage } = require('../services/claudeService');
 const { runPipeline } = require('../services/agentPipeline');
+const { regenerateSection } = require('../services/agents/sectionWriter');
+const { analyzeDocuments } = require('../services/agents/documentAnalyzer');
+const { generateCompetitiveIntel } = require('../services/agents/competitiveIntelAgent');
 
 router.post('/', async (req, res) => {
   try {
@@ -65,7 +68,7 @@ router.post('/stream', async (req, res) => {
 // Multi-agent pipeline SSE endpoint
 router.post('/pipeline', async (req, res) => {
   try {
-    const { answers, fileContext, docType, confirmedSections } = req.body;
+    const { answers, fileContext, docType, confirmedSections, uploadedDocuments } = req.body;
 
     if (!answers || !docType) {
       return res.status(400).json({ error: 'answers and docType are required' });
@@ -78,8 +81,19 @@ router.post('/pipeline', async (req, res) => {
     res.setHeader('X-Accel-Buffering', 'no');
     res.flushHeaders();
 
+    // Track how many async results we expect (review + intel + optionally analysis)
+    let asyncPending = 2; // review + competitive intel
+    if (uploadedDocuments && uploadedDocuments.length > 0) asyncPending++;
+
+    const tryClose = () => {
+      asyncPending--;
+      if (asyncPending <= 0 && !res.writableEnded) {
+        res.end();
+      }
+    };
+
     await runPipeline(
-      { answers, fileContext, docType, confirmedSections },
+      { answers, fileContext, docType, confirmedSections, uploadedDocuments },
       {
         onSectionStart: (title, index, total) => {
           res.write(`data: ${JSON.stringify({ type: 'section_start', title, index, total })}\n\n`);
@@ -95,7 +109,15 @@ router.post('/pipeline', async (req, res) => {
         },
         onReview: (reviewResult) => {
           res.write(`data: ${JSON.stringify({ type: 'review', content: reviewResult })}\n\n`);
-          res.end();
+          tryClose();
+        },
+        onCompetitiveIntel: (intelResult) => {
+          res.write(`data: ${JSON.stringify({ type: 'competitive_intel', content: intelResult })}\n\n`);
+          tryClose();
+        },
+        onDocumentAnalysis: (analysisResult) => {
+          res.write(`data: ${JSON.stringify({ type: 'document_analysis', content: analysisResult })}\n\n`);
+          tryClose();
         },
         onError: (errorMessage) => {
           res.write(`data: ${JSON.stringify({ type: 'error', content: errorMessage })}\n\n`);
@@ -119,6 +141,90 @@ router.post('/pipeline', async (req, res) => {
     } else {
       res.status(500).json({ error: 'Failed to run pipeline. Please try again.' });
     }
+  }
+});
+
+// Section regeneration SSE endpoint (shared by section regen + quality review fix)
+router.post('/regenerate-section', async (req, res) => {
+  try {
+    const { sectionTitle, currentContent, instruction, docType, answers, fileContext } = req.body;
+
+    if (!sectionTitle || !instruction) {
+      return res.status(400).json({ error: 'sectionTitle and instruction are required' });
+    }
+
+    // Set SSE headers
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
+
+    await regenerateSection(
+      { sectionTitle, currentContent, instruction, docType, answers, fileContext },
+      (chunk) => {
+        res.write(`data: ${JSON.stringify({ type: 'text', content: chunk })}\n\n`);
+      },
+      (fullText) => {
+        res.write(`data: ${JSON.stringify({ type: 'done', content: fullText })}\n\n`);
+        res.end();
+      }
+    );
+  } catch (error) {
+    console.error('Regenerate section error:', error.message);
+    if (res.headersSent) {
+      res.write(`data: ${JSON.stringify({ type: 'error', content: 'Section regeneration failed. Please try again.' })}\n\n`);
+      res.end();
+    } else {
+      res.status(500).json({ error: 'Failed to regenerate section. Please try again.' });
+    }
+  }
+});
+
+// Document analysis endpoint (cross-reference uploaded docs with generated sections)
+router.post('/analyze-documents', async (req, res) => {
+  try {
+    const { documents, generatedSections, docType, answers } = req.body;
+
+    if (!documents || !Array.isArray(documents) || documents.length === 0) {
+      return res.status(400).json({ error: 'documents array is required' });
+    }
+    if (!generatedSections || !Array.isArray(generatedSections)) {
+      return res.status(400).json({ error: 'generatedSections array is required' });
+    }
+
+    const result = await analyzeDocuments({ documents, generatedSections, docType, answers });
+
+    if (result) {
+      res.json(result);
+    } else {
+      res.json({ gaps: [], conflicts: [], enrichments: [] });
+    }
+  } catch (error) {
+    console.error('Document analysis error:', error.message);
+    res.status(500).json({ error: 'Document analysis failed.' });
+  }
+});
+
+// Competitive intelligence endpoint
+router.post('/competitive-intel', async (req, res) => {
+  try {
+    const { docType, answers, industryProfile } = req.body;
+
+    if (!docType || !answers) {
+      return res.status(400).json({ error: 'docType and answers are required' });
+    }
+
+    const result = await generateCompetitiveIntel({ docType, answers, industryProfile });
+
+    if (result) {
+      res.json(result);
+    } else {
+      res.json({ industryBenchmarks: [], marketStandards: [], riskFactors: [], suggestedRequirements: [] });
+    }
+  } catch (error) {
+    console.error('Competitive intel error:', error.message);
+    res.status(500).json({ error: 'Competitive intelligence generation failed.' });
   }
 });
 

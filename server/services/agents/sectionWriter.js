@@ -134,4 +134,84 @@ async function writeSection(config, onText, onDone) {
   return completeSection;
 }
 
-module.exports = { writeSection };
+/**
+ * Regenerate / refine a single document section via streaming.
+ * Used for section-level regeneration and quality review auto-fix.
+ *
+ * @param {Object} config Regeneration configuration
+ * @param {string} config.sectionTitle The section heading
+ * @param {string} config.currentContent Existing section body text
+ * @param {string} config.instruction What to do (e.g. "Make more specific", custom text, or issue fix)
+ * @param {string} config.docType 'RFI' or 'RFP'
+ * @param {Object} config.answers All gathered answers for context
+ * @param {string} config.fileContext Uploaded file text (optional)
+ * @param {Function} onText Called with each text chunk
+ * @param {Function} onDone Called with the complete refined text
+ * @returns {Promise<string>} The complete refined section text
+ */
+async function regenerateSection(config, onText, onDone) {
+  const {
+    sectionTitle,
+    currentContent,
+    instruction,
+    docType,
+    answers,
+    fileContext,
+  } = config;
+
+  const docLabel = docType === 'RFI' ? 'Request for Information' : 'Request for Proposal';
+
+  const systemPrompt = `You are an expert procurement document writer refining ONE section of a ${docLabel} (${docType}).
+
+YOUR TASK: Rewrite the section below according to the user's instruction.
+
+RULES:
+- Maintain procurement language standards (shall/should/may).
+- Be specific and quantifiable wherever possible.
+- Do NOT output the section heading (## title) — only output the body content.
+- Use ### for subsections within this section.
+- Write thorough, publication-ready procurement language.
+- If the instruction asks to make it more concise, cut redundancy but preserve all critical requirements.
+- If the instruction asks to make it more specific, add concrete metrics, SLAs, and quantifiable criteria.
+- If the instruction describes an issue to fix, address that specific issue while preserving the rest of the section.
+
+CURRENT SECTION CONTENT:
+${currentContent}`;
+
+  let userPrompt = `**Instruction:** ${instruction}\n\n`;
+
+  // Add project context from answers
+  const answerEntries = Object.entries(answers || {});
+  if (answerEntries.length > 0) {
+    userPrompt += `**Project context:**\n`;
+    for (const [key, value] of answerEntries) {
+      if (value && value !== '*(Skipped)*') {
+        userPrompt += `- ${key}: ${value}\n`;
+      }
+    }
+  }
+
+  if (fileContext) {
+    userPrompt += `\n**Reference document excerpt:**\n${fileContext.substring(0, 2000)}\n`;
+  }
+
+  userPrompt += `\nRewrite the "${sectionTitle}" section now. Output ONLY the refined body content, no heading.`;
+
+  let refinedContent = '';
+
+  const fullText = await agentStream(
+    systemPrompt,
+    userPrompt,
+    (chunk) => {
+      refinedContent += chunk;
+      if (onText) onText(chunk);
+    },
+    () => {},
+    { maxTokens: 4000, temperature: 0.4 }
+  );
+
+  if (onDone) onDone(fullText);
+  return fullText;
+}
+
+module.exports = { writeSection, regenerateSection };

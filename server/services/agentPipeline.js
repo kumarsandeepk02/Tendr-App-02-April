@@ -1,6 +1,8 @@
 const { generateOutline } = require('./agents/outlineArchitect');
 const { writeSection } = require('./agents/sectionWriter');
 const { reviewDocument } = require('./agents/qualityReviewer');
+const { analyzeDocuments } = require('./agents/documentAnalyzer');
+const { generateCompetitiveIntel } = require('./agents/competitiveIntelAgent');
 
 // Circuit breaker: max total output tokens (approximate via character count)
 const MAX_TOTAL_CHARS = 100000; // ~25k tokens
@@ -18,11 +20,12 @@ const MAX_TOTAL_CHARS = 100000; // ~25k tokens
  * @param {string} [config.fileContext] Uploaded document text
  * @param {string} config.docType 'RFI' or 'RFP'
  * @param {string[]} [config.confirmedSections] User-confirmed section titles
+ * @param {Array} [config.uploadedDocuments] Array of {name, text} for multi-doc analysis
  * @param {Object} callbacks Event callbacks
  */
 async function runPipeline(config, callbacks) {
-  const { answers, fileContext, docType, confirmedSections } = config;
-  const { onSectionStart, onText, onSectionDone, onDone, onReview, onError } = callbacks;
+  const { answers, fileContext, docType, confirmedSections, uploadedDocuments } = config;
+  const { onSectionStart, onText, onSectionDone, onDone, onReview, onDocumentAnalysis, onCompetitiveIntel, onError } = callbacks;
 
   let fullDocument = '';
   let totalChars = 0;
@@ -110,6 +113,26 @@ async function runPipeline(config, callbacks) {
       .catch((err) => {
         console.warn('Quality review failed (non-critical):', err.message);
       });
+
+    // Phase 4: Competitive Intelligence (async — fire and forget)
+    generateCompetitiveIntel({ docType, answers, industryProfile: industry })
+      .then((intel) => {
+        if (intel && onCompetitiveIntel) onCompetitiveIntel(intel);
+      })
+      .catch((err) => {
+        console.warn('Competitive intel failed (non-critical):', err.message);
+      });
+
+    // Phase 5: Document Analysis — only if multiple documents uploaded
+    if (uploadedDocuments && uploadedDocuments.length > 0 && completedSections.length > 0) {
+      analyzeDocuments({ documents: uploadedDocuments, generatedSections: completedSections, docType, answers })
+        .then((analysis) => {
+          if (analysis && onDocumentAnalysis) onDocumentAnalysis(analysis);
+        })
+        .catch((err) => {
+          console.warn('Document analysis failed (non-critical):', err.message);
+        });
+    }
 
   } catch (err) {
     console.error('Pipeline failed:', err.message);

@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { SectionSuggestion } from './types';
+import { SectionSuggestion, UploadedDocument } from './types';
 import { useChat } from './hooks/useChat';
 import { useDocument } from './hooks/useDocument';
 import { useProjects } from './hooks/useProjects';
@@ -27,6 +27,9 @@ function App() {
   // Track if flow has been started (use ref to survive StrictMode double-render)
   const flowStartedRef = useRef(false);
   const [resetCounter, setResetCounter] = useState(0);
+
+  // Ref to capture uploadedDocuments for save callbacks without causing re-render loops
+  const uploadedDocumentsRef = useRef<UploadedDocument[]>([]);
 
   // Sidebar collapse state
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
@@ -71,9 +74,26 @@ function App() {
     // Pipeline
     currentSection,
     qualityReview,
+    documentAnalysis,
+    competitiveIntel,
     handleSectionStart,
     handleSectionDone,
     handleReviewResult,
+    handleDocumentAnalysis,
+    handleCompetitiveIntel,
+    // Section regeneration
+    regeneratingSectionId,
+    previousSectionContent,
+    handleSectionRegenerationStart,
+    handleSectionRegenerationDone,
+    undoRegeneration,
+    // Quality review fix
+    fixingIssue,
+    fixedIssues,
+    handleFixStart,
+    handleFixDone,
+    // Helpers
+    findSectionByTitle,
   } = useDocument(activeProjectId);
 
   // Chat options (memoized to prevent infinite re-renders)
@@ -91,9 +111,13 @@ function App() {
       onSectionStart: handleSectionStart,
       onSectionDone: handleSectionDone,
       onReviewResult: handleReviewResult,
+      onSectionRegenerationStart: handleSectionRegenerationStart,
+      onSectionRegenerationDone: handleSectionRegenerationDone,
+      onDocumentAnalysis: handleDocumentAnalysis,
+      onCompetitiveIntel: handleCompetitiveIntel,
       projectId: activeProjectId,
     }),
-    [parseSectionsFromMarkdown, updateMeta, handleStreamStart, handleStreamChunk, handleStreamDone, handleSectionStart, handleSectionDone, handleReviewResult, activeProjectId]
+    [parseSectionsFromMarkdown, updateMeta, handleStreamStart, handleStreamChunk, handleStreamDone, handleSectionStart, handleSectionDone, handleReviewResult, handleSectionRegenerationStart, handleSectionRegenerationDone, handleDocumentAnalysis, handleCompetitiveIntel, activeProjectId]
   );
 
   // Chat state
@@ -105,6 +129,8 @@ function App() {
     isGenerating,
     gatheredAnswers,
     uploadedFileText,
+    uploadedDocuments,
+    removeUploadedDocument,
     outlineSections,
     isOutlineLoading,
     startFlow,
@@ -120,7 +146,17 @@ function App() {
     retryLast,
     restoreChat,
     resetChat,
+    // Section regeneration & quality fix
+    regenerateSection,
+    copilotEdit,
+    fixIssue,
+    fixAllErrors,
   } = useChat(chatOptions);
+
+  // Keep ref in sync with uploadedDocuments to avoid infinite re-render loops in save callbacks
+  useEffect(() => {
+    uploadedDocumentsRef.current = uploadedDocuments;
+  }, [uploadedDocuments]);
 
   // Restore active project on initial mount
   const initialLoadRef = useRef(false);
@@ -167,7 +203,7 @@ function App() {
     // Save current project
     if (activeProjectId) {
       saveProject(activeProjectId, {
-        chatState: { messages, guidedStep, phase, gatheredAnswers, uploadedFileText, outlineSections },
+        chatState: { messages, guidedStep, phase, gatheredAnswers, uploadedFileText, uploadedDocuments: uploadedDocumentsRef.current, outlineSections },
         documentState,
         savedAt: Date.now(),
       });
@@ -177,6 +213,7 @@ function App() {
     resetDocument();
     flowStartedRef.current = false;
     setResetCounter((c) => c + 1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeProjectId, messages, guidedStep, phase, gatheredAnswers, uploadedFileText, outlineSections, documentState, saveProject, createProject, resetChat, resetDocument]);
 
   const handleSelectProject = useCallback(
@@ -184,7 +221,7 @@ function App() {
       if (targetId === activeProjectId) return;
 
       const currentDraft = {
-        chatState: { messages, guidedStep, phase, gatheredAnswers, uploadedFileText, outlineSections },
+        chatState: { messages, guidedStep, phase, gatheredAnswers, uploadedFileText, uploadedDocuments: uploadedDocumentsRef.current, outlineSections },
         documentState,
         savedAt: Date.now(),
       };
@@ -206,6 +243,7 @@ function App() {
         setResetCounter((c) => c + 1);
       }
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [activeProjectId, messages, guidedStep, phase, gatheredAnswers, uploadedFileText, outlineSections, documentState, switchProject, restoreChat, restoreDocument, resetChat, resetDocument]
   );
 
@@ -318,6 +356,8 @@ function App() {
             onSkipToGenerate={skipToGenerate}
             onScopeUpload={handleScopeUpload}
             onSkipScopeUpload={skipScopeUpload}
+            uploadedDocuments={uploadedDocuments}
+            onRemoveDocument={removeUploadedDocument}
             onTriggerGenerate={triggerGenerate}
             onToggleOutlineSection={toggleOutlineSection}
             onApproveOutline={approveOutline}
@@ -340,6 +380,25 @@ function App() {
               onRemoveSection={removeSection}
               onAddSection={addSection}
               onReorderSections={reorderSections}
+              // Section regeneration
+              regeneratingSectionId={regeneratingSectionId}
+              onRegenerateSection={regenerateSection}
+              previousSectionContent={previousSectionContent}
+              onUndoRegeneration={undoRegeneration}
+              // Copilot
+              onCopilotEdit={copilotEdit}
+              // Document analysis & competitive intel
+              documentAnalysis={documentAnalysis}
+              competitiveIntel={competitiveIntel}
+              onApplySuggestion={regenerateSection}
+              // Quality review fix
+              onFixIssue={fixIssue}
+              fixingIssue={fixingIssue}
+              fixedIssues={fixedIssues}
+              findSectionByTitle={findSectionByTitle}
+              onFixAllErrors={fixAllErrors}
+              onFixStart={handleFixStart}
+              onFixDone={handleFixDone}
             />
           </div>
         )}

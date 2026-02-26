@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { ChatMessage, UnifiedFlowPhase, GuidedStep, OutlineSection, SectionProgress } from '../types';
+import { ChatMessage, UnifiedFlowPhase, GuidedStep, OutlineSection, SectionProgress, UploadedDocument } from '../types';
 import MessageBubble from './MessageBubble';
 import TextareaAutosize from 'react-textarea-autosize';
 import { useDropzone } from 'react-dropzone';
@@ -33,8 +33,10 @@ interface ChatProps {
   onFileUpload: () => void;
   onSkipStep: () => void;
   onSkipToGenerate: () => void;
-  onScopeUpload: (fileText: string) => void;
+  onScopeUpload: (fileText: string, fileName?: string) => void;
   onSkipScopeUpload: () => void;
+  uploadedDocuments?: UploadedDocument[];
+  onRemoveDocument?: (docId: string) => void;
   onTriggerGenerate: (fileText?: string) => void;
   onToggleOutlineSection: (sectionId: string) => void;
   onApproveOutline: () => void;
@@ -69,7 +71,8 @@ const TypingIndicator: React.FC = () => (
 const InlineUploadZone: React.FC<{
   onUploadAndGenerate: (fileText: string) => void;
   onSkipAndGenerate: () => void;
-}> = ({ onUploadAndGenerate, onSkipAndGenerate }) => {
+  uploadedDocumentsCount?: number;
+}> = ({ onUploadAndGenerate, onSkipAndGenerate, uploadedDocumentsCount = 0 }) => {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
 
@@ -146,7 +149,7 @@ const InlineUploadZone: React.FC<{
               className="w-full flex items-center justify-center gap-2 py-2.5 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors"
             >
               <FileText size={14} />
-              Generate Document
+              Generate Document{uploadedDocumentsCount > 0 ? ` (${uploadedDocumentsCount} ref docs)` : ''}
             </button>
           </>
         )}
@@ -155,13 +158,15 @@ const InlineUploadZone: React.FC<{
   );
 };
 
-// Inline upload zone for scope documents (mid-flow)
+// Inline upload zone for scope documents (mid-flow) — supports multiple uploads
 const ScopeUploadZone: React.FC<{
-  onUploadScope: (fileText: string) => void;
+  onUploadScope: (fileText: string, fileName?: string) => void;
   onSkip: () => void;
-}> = ({ onUploadScope, onSkip }) => {
+  uploadedDocuments?: UploadedDocument[];
+  onRemoveDocument?: (docId: string) => void;
+}> = ({ onUploadScope, onSkip, uploadedDocuments = [], onRemoveDocument }) => {
   const [isUploading, setIsUploading] = useState(false);
-  const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
+  const [uploadingFileName, setUploadingFileName] = useState<string | null>(null);
 
   const onDrop = useCallback(
     async (acceptedFiles: File[]) => {
@@ -169,7 +174,7 @@ const ScopeUploadZone: React.FC<{
       if (!file) return;
 
       setIsUploading(true);
-      setUploadedFileName(file.name);
+      setUploadingFileName(file.name);
 
       try {
         const formData = new FormData();
@@ -180,12 +185,12 @@ const ScopeUploadZone: React.FC<{
         });
 
         const extractedText = res.data.text || '';
-        onUploadScope(extractedText);
+        onUploadScope(extractedText, file.name);
       } catch (err) {
-        setUploadedFileName(null);
         alert('Failed to upload file. Please try again or skip.');
       } finally {
         setIsUploading(false);
+        setUploadingFileName(null);
       }
     },
     [onUploadScope]
@@ -210,11 +215,34 @@ const ScopeUploadZone: React.FC<{
           <div className="flex items-center gap-3 justify-center py-3">
             <Loader2 size={20} className="text-amber-600 animate-spin" />
             <span className="text-sm text-amber-700">
-              Reading {uploadedFileName}...
+              Reading {uploadingFileName}...
             </span>
           </div>
         ) : (
           <>
+            {/* Already-uploaded documents */}
+            {uploadedDocuments.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mb-3">
+                {uploadedDocuments.map((doc) => (
+                  <span
+                    key={doc.id}
+                    className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-amber-800 bg-amber-100 border border-amber-200 rounded-full"
+                  >
+                    <FileText size={10} />
+                    {doc.name}
+                    {onRemoveDocument && (
+                      <button
+                        onClick={() => onRemoveDocument(doc.id)}
+                        className="ml-0.5 text-amber-500 hover:text-amber-700"
+                      >
+                        ×
+                      </button>
+                    )}
+                  </span>
+                ))}
+              </div>
+            )}
+
             <div
               {...getRootProps()}
               className={`border-2 border-dashed rounded-lg p-4 text-center cursor-pointer transition-colors mb-3 ${
@@ -226,7 +254,11 @@ const ScopeUploadZone: React.FC<{
               <input {...getInputProps()} />
               <Upload size={24} className="mx-auto mb-2 text-amber-500" />
               <p className="text-sm font-medium text-amber-800">
-                {isDragActive ? 'Drop your file here' : 'Drop a scope document, SOW, or project brief'}
+                {isDragActive
+                  ? 'Drop your file here'
+                  : uploadedDocuments.length > 0
+                  ? 'Upload another reference document'
+                  : 'Drop a scope document, SOW, or project brief'}
               </p>
               <p className="text-xs text-amber-600 mt-1">PDF, DOCX, or TXT (max 10MB)</p>
             </div>
@@ -236,7 +268,7 @@ const ScopeUploadZone: React.FC<{
               className="w-full flex items-center justify-center gap-2 py-2 text-sm font-medium text-amber-700 bg-white border border-amber-200 rounded-lg hover:bg-amber-50 transition-colors"
             >
               <SkipForward size={14} />
-              Skip — I'll answer the questions instead
+              {uploadedDocuments.length > 0 ? 'Continue with these documents' : "Skip — I'll answer the questions instead"}
             </button>
           </>
         )}
@@ -357,6 +389,8 @@ const Chat: React.FC<ChatProps> = ({
   onSkipToGenerate,
   onScopeUpload,
   onSkipScopeUpload,
+  uploadedDocuments,
+  onRemoveDocument,
   onTriggerGenerate,
   onToggleOutlineSection,
   onApproveOutline,
@@ -459,6 +493,8 @@ const Chat: React.FC<ChatProps> = ({
         <ScopeUploadZone
           onUploadScope={onScopeUpload}
           onSkip={onSkipScopeUpload}
+          uploadedDocuments={uploadedDocuments}
+          onRemoveDocument={onRemoveDocument}
         />
       )}
 
@@ -467,6 +503,7 @@ const Chat: React.FC<ChatProps> = ({
         <InlineUploadZone
           onUploadAndGenerate={(fileText) => onTriggerGenerate(fileText)}
           onSkipAndGenerate={() => onTriggerGenerate()}
+          uploadedDocumentsCount={uploadedDocuments?.length || 0}
         />
       )}
 

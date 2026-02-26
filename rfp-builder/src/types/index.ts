@@ -101,6 +101,7 @@ export interface Draft {
     phase: UnifiedFlowPhase;
     gatheredAnswers?: Record<string, string>;
     uploadedFileText?: string;
+    uploadedDocuments?: UploadedDocument[];
     outlineSections?: OutlineSection[];
   };
   documentState: DocumentState;
@@ -161,6 +162,74 @@ export interface SectionProgress {
   title: string;
   index: number;
   total: number;
+}
+
+// ===================== Multi-Document Types =====================
+
+export interface UploadedDocument {
+  id: string;
+  name: string;
+  text: string;
+  uploadedAt: number;
+}
+
+// ===================== Document Analysis Types =====================
+
+export interface AnalysisGap {
+  source: string;
+  requirement: string;
+  suggestedSection: string;
+}
+
+export interface AnalysisConflict {
+  doc1: string;
+  doc2: string;
+  description: string;
+}
+
+export interface AnalysisEnrichment {
+  section: string;
+  suggestion: string;
+  sourceDoc: string;
+}
+
+export interface DocumentAnalysis {
+  gaps: AnalysisGap[];
+  conflicts: AnalysisConflict[];
+  enrichments: AnalysisEnrichment[];
+}
+
+// ===================== Competitive Intelligence Types =====================
+
+export interface IndustryBenchmark {
+  metric: string;
+  benchmark: string;
+  source: string;
+}
+
+export interface MarketStandard {
+  standard: string;
+  relevance: string;
+  applicableSection: string;
+}
+
+export interface RiskFactor {
+  category: string;
+  risk: string;
+  mitigation: string;
+}
+
+export interface SuggestedRequirement {
+  requirement: string;
+  rationale: string;
+  targetSection: string;
+}
+
+export interface CompetitiveIntelligence {
+  industryBenchmarks: IndustryBenchmark[];
+  marketStandards: MarketStandard[];
+  riskFactors: RiskFactor[];
+  suggestedRequirements: SuggestedRequirement[];
 }
 
 // ===================== Onboarding =====================
