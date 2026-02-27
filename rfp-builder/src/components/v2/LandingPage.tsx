@@ -21,7 +21,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
           Powered by AI
         </div>
         <h1 className="text-4xl font-bold text-gray-900 mb-4 tracking-tight">
-          Build procurement documents
+          Build RFX documents
           <br />
           <span className="text-indigo-600">in minutes, not days</span>
         </h1>
