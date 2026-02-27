@@ -6,6 +6,7 @@ import {
   V2Phase,
   BriefData,
   NarrationMessage,
+  NarrationAgent,
   QualityReview,
   UploadedDocument,
   DocumentAnalysis,
@@ -34,9 +35,19 @@ interface UseChatV2Options {
   projectId?: string | null;
 }
 
-const WELCOME_MESSAGE = `Hey! I'm your procurement document assistant. Tell me about your project and I'll help you create a professional RFP or RFI.
+const WELCOME_MESSAGES: Record<string, string> = {
+  default: `Hi, I'm Priya, your RFP analyst. Let's brainstorm what you need for this procurement document. Once I have the details, I'll hand everything over to our writing team to generate a polished draft.
 
-**What are you working on?** You can describe your project in your own words — I'll ask follow-up questions to make sure we cover everything.`;
+Think of this as your first prep meeting — tell me about your project in your own words, and I'll ask the right follow-up questions. **What are you working on?**`,
+
+  RFP: `Hi, I'm Priya, your RFP analyst. Let's build out your **Request for Proposal**. Tell me about the project — what are you procuring, who's it for, and what does success look like?
+
+I'll ask follow-up questions to make sure we cover everything before handing off to the writing team.`,
+
+  RFI: `Hi, I'm Priya, your RFP analyst. Let's put together your **Request for Information**. Tell me about what you're exploring — what market or capability are you trying to understand?
+
+I'll help you frame the right questions before we generate the document.`,
+};
 
 export function useChatV2(options?: UseChatV2Options) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -102,12 +113,13 @@ export function useChatV2(options?: UseChatV2Options) {
   );
 
   const addNarration = useCallback(
-    (content: string, type: NarrationMessage['type'] = 'thinking') => {
+    (content: string, type: NarrationMessage['type'] = 'thinking', agent?: NarrationAgent) => {
       const msg: NarrationMessage = {
         id: generateId(),
         content,
         timestamp: Date.now(),
         type,
+        agent,
       };
       setNarrations((prev) => [...prev, msg]);
       return msg;
@@ -122,8 +134,8 @@ export function useChatV2(options?: UseChatV2Options) {
       setMessages([]);
 
       const welcomeContent = docType
-        ? `Let's create your **${docType}**! Tell me about the project — what are you procuring and what's the context?`
-        : WELCOME_MESSAGE;
+        ? WELCOME_MESSAGES[docType]
+        : WELCOME_MESSAGES.default;
 
       setTimeout(() => {
         addMessage('assistant', welcomeContent);
@@ -298,7 +310,8 @@ export function useChatV2(options?: UseChatV2Options) {
               optionsRef.current?.onCompetitiveIntel?.(parsed.content);
             } else if (parsed.type === 'narration') {
               // V2-specific: narration events for "thinking out loud"
-              addNarration(parsed.content, 'progress');
+              const narrationStyle = parsed.narrationStyle === 'handover' ? 'handover' : 'progress';
+              addNarration(parsed.content, narrationStyle as NarrationMessage['type'], parsed.agent);
             }
           } catch (parseErr: any) {
             if (parseErr.message && parseErr.message !== 'Unexpected end of JSON input') {
@@ -322,11 +335,16 @@ export function useChatV2(options?: UseChatV2Options) {
 
     // Notify that streaming is starting
     optionsRef.current?.onStreamStart?.();
-    addNarration('Analyzing your brief and planning the document structure...', 'thinking');
+    addNarration('Analyzing your brief and planning the document structure...', 'thinking', 'planning');
 
     const confirmedSections = brief.suggestedSections
       .filter((s) => s.included !== false)
       .map((s) => s.title);
+
+    // Build planning messages for contextual narration generation
+    const planningMessages = messages
+      .filter((m) => !m.isLoading && !m.isError)
+      .map((m) => ({ role: m.role, content: m.content }));
 
     try {
       const response = await fetch(`${API_URL}/api/chat/v2/pipeline`, {
@@ -337,6 +355,7 @@ export function useChatV2(options?: UseChatV2Options) {
           fileContext: uploadedFileText || undefined,
           confirmedSections,
           uploadedDocuments: uploadedDocuments.map((d) => ({ name: d.name, text: d.text })),
+          planningMessages,
           model: selectedModel || undefined,
         }),
       });
@@ -386,7 +405,7 @@ export function useChatV2(options?: UseChatV2Options) {
     } finally {
       setIsGenerating(false);
     }
-  }, [brief, uploadedFileText, uploadedDocuments, selectedModel, readSSEStream, addNarration]);
+  }, [brief, messages, uploadedFileText, uploadedDocuments, selectedModel, readSSEStream, addNarration]);
 
   // Go back to planning from brief
   const backToPlanning = useCallback(() => {

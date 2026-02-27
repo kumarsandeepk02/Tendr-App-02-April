@@ -5,7 +5,7 @@ const { runPipeline } = require('../services/agentPipeline');
 const { regenerateSection } = require('../services/agents/sectionWriter');
 const { analyzeDocuments } = require('../services/agents/documentAnalyzer');
 const { generateCompetitiveIntel } = require('../services/agents/competitiveIntelAgent');
-const { planningChat, generateBrief } = require('../services/agents/planningAgent');
+const { planningChat, generateBrief, generateNarrations } = require('../services/agents/planningAgent');
 
 // GET available models
 router.get('/models', (req, res) => {
@@ -292,7 +292,7 @@ router.post('/v2/brief', async (req, res) => {
 // V2: Pipeline with narration events (uses existing pipeline but adds narration SSE events)
 router.post('/v2/pipeline', async (req, res) => {
   try {
-    const { brief, fileContext, confirmedSections, uploadedDocuments, model } = req.body;
+    const { brief, fileContext, confirmedSections, uploadedDocuments, planningMessages, model } = req.body;
 
     if (!brief) {
       return res.status(400).json({ error: 'brief is required' });
@@ -318,6 +318,15 @@ router.post('/v2/pipeline', async (req, res) => {
     res.setHeader('X-Accel-Buffering', 'no');
     res.flushHeaders();
 
+    // Generate contextual narrations upfront (non-blocking — use defaults on failure)
+    let contextualNarrations = {};
+    try {
+      res.write(`data: ${JSON.stringify({ type: 'narration', content: '📋 Planning complete. Handing off to the Writing Team...', agent: 'research', narrationStyle: 'handover' })}\n\n`);
+      contextualNarrations = await generateNarrations({ brief, messages: planningMessages || [], model });
+    } catch (err) {
+      console.warn('Contextual narration generation failed, using defaults:', err.message);
+    }
+
     // Track async results
     let asyncPending = 2;
     if (uploadedDocuments && uploadedDocuments.length > 0) asyncPending++;
@@ -333,8 +342,10 @@ router.post('/v2/pipeline', async (req, res) => {
       { answers, fileContext, docType, confirmedSections, uploadedDocuments, model },
       {
         onSectionStart: (title, index, total) => {
-          // V2: Send narration event before section_start
-          res.write(`data: ${JSON.stringify({ type: 'narration', content: `Starting section ${index + 1} of ${total}: **${title}**` })}\n\n`);
+          // Use contextual narration if available, fall back to generic
+          const narration = contextualNarrations[title]
+            || `Writing section ${index + 1} of ${total}: **${title}**`;
+          res.write(`data: ${JSON.stringify({ type: 'narration', content: narration, agent: 'writer' })}\n\n`);
           res.write(`data: ${JSON.stringify({ type: 'section_start', title, index, total })}\n\n`);
         },
         onText: (chunk) => {
@@ -342,22 +353,22 @@ router.post('/v2/pipeline', async (req, res) => {
         },
         onSectionDone: (title, content) => {
           res.write(`data: ${JSON.stringify({ type: 'section_done', title, content })}\n\n`);
-          res.write(`data: ${JSON.stringify({ type: 'narration', content: `✓ Completed **${title}**` })}\n\n`);
+          res.write(`data: ${JSON.stringify({ type: 'narration', content: `✓ Completed **${title}**`, agent: 'writer' })}\n\n`);
         },
         onDone: (fullDocument) => {
-          res.write(`data: ${JSON.stringify({ type: 'narration', content: '📋 All sections complete. Running quality review...' })}\n\n`);
+          res.write(`data: ${JSON.stringify({ type: 'narration', content: 'All sections written. Handing off to Quality Reviewer...', agent: 'writer', narrationStyle: 'handover' })}\n\n`);
           res.write(`data: ${JSON.stringify({ type: 'done', content: fullDocument })}\n\n`);
         },
         onReview: (reviewResult) => {
           if (reviewResult && !res.writableEnded) {
-            res.write(`data: ${JSON.stringify({ type: 'narration', content: `✅ Quality review complete — score: ${reviewResult.score}/100` })}\n\n`);
+            res.write(`data: ${JSON.stringify({ type: 'narration', content: `✅ Quality review complete — score: ${reviewResult.score}/100`, agent: 'reviewer' })}\n\n`);
             res.write(`data: ${JSON.stringify({ type: 'review', content: reviewResult })}\n\n`);
           }
           tryClose();
         },
         onCompetitiveIntel: (intelResult) => {
           if (intelResult && !res.writableEnded) {
-            res.write(`data: ${JSON.stringify({ type: 'narration', content: '🔍 Competitive intelligence analysis complete' })}\n\n`);
+            res.write(`data: ${JSON.stringify({ type: 'narration', content: '🔍 Competitive intelligence analysis complete', agent: 'research' })}\n\n`);
             res.write(`data: ${JSON.stringify({ type: 'competitive_intel', content: intelResult })}\n\n`);
           }
           tryClose();

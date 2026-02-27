@@ -1,5 +1,5 @@
 import React from 'react';
-import { FileText, FileSearch, Upload, Sparkles, ArrowRight } from 'lucide-react';
+import { FileText, FileSearch, Sparkles, ArrowRight, MessageSquare } from 'lucide-react';
 
 interface LandingPageProps {
   onStartRFP: () => void;
@@ -48,10 +48,10 @@ const LandingPage: React.FC<LandingPageProps> = ({
           onClick={onStartRFI}
         />
         <ActionCard
-          icon={<Upload size={24} />}
-          title="Just Chat"
-          description="Describe your project freely and I'll figure out what you need"
-          color="gray"
+          icon={<MessageSquare size={24} />}
+          title="Brainstorm RFP/RFIs"
+          description="Not sure what you need? Let's figure it out together"
+          color="amber"
           onClick={onStartFreeform}
         />
       </div>
@@ -96,6 +96,13 @@ const ActionCard: React.FC<{
       iconColor: 'text-gray-600',
       hover: 'hover:border-gray-300 hover:shadow-gray-100',
       ring: 'group-hover:ring-gray-100',
+    },
+    amber: {
+      bg: 'bg-white',
+      iconBg: 'bg-amber-50',
+      iconColor: 'text-amber-600',
+      hover: 'hover:border-amber-300 hover:shadow-amber-100',
+      ring: 'group-hover:ring-amber-100',
     },
   };
 

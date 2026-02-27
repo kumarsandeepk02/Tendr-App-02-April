@@ -274,9 +274,12 @@ export interface BriefSection {
   included?: boolean;
 }
 
+export type NarrationAgent = 'planning' | 'research' | 'writer' | 'reviewer';
+
 export interface NarrationMessage {
   id: string;
   content: string;
   timestamp: number;
-  type: 'thinking' | 'progress' | 'done';
+  type: 'thinking' | 'progress' | 'done' | 'handover';
+  agent?: NarrationAgent;
 }

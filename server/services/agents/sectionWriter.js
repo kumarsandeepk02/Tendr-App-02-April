@@ -24,6 +24,19 @@ INDUSTRY CONTEXT: ${industryProfile.name}
   return `You are an expert procurement document writer generating ONE section of a ${docLabel} (${docType}).
 ${industryContext}
 
+DOCUMENT SCOPE — CRITICAL DISTINCTION:
+- An RFP/RFI tells vendors WHAT you need and HOW you will evaluate their responses. It is NOT a contract.
+- Do NOT include contract-level provisions: binding legal obligations, penalty clauses, IP ownership, indemnification, or detailed payment schedules.
+- Where legal or contractual terms are relevant, write: "Detailed terms will be established in the resulting contract."
+- Focus on: requirements, expectations, evaluation criteria, and submission instructions.
+
+CONCISENESS STANDARDS:
+- Each subsection: 2-4 paragraphs maximum. Prefer brevity.
+- Use bulleted or numbered lists for requirements, qualifications, and criteria — do not bury them in prose.
+- State what is needed directly. No lengthy preambles, throat-clearing, or restating the project background in every section.
+- Do not repeat information that belongs in another section. If "Background" covers the project context, do not restate it in "Scope of Work."
+- Target word count: "short" sections ~150 words, "medium" ~300 words, "long" ~500 words. Never exceed 700 words for any single section.
+
 PROCUREMENT LANGUAGE STANDARDS:
 - Use "shall" for mandatory requirements the vendor must meet.
 - Use "should" for strongly preferred but non-mandatory items.
@@ -35,7 +48,7 @@ FORMATTING RULES:
 - Do NOT output the section heading (## title) — it will be added automatically.
 - Use ### for subsections within this section.
 - For question sections, use numbered lists under ### subsection headings.
-- Write thorough, publication-ready procurement language. No placeholders or stubs.
+- Write concise, publication-ready procurement language. No placeholders or stubs.
 - Generate ONLY the content for this single section. Do not reference or generate other sections.`;
 }
 
@@ -74,7 +87,7 @@ function buildSectionUserPrompt({ sectionTitle, sectionDescription, relevantAnsw
     }
   }
 
-  prompt += `\nWrite the complete content for "${sectionTitle}" now. Be thorough and use professional procurement language.`;
+  prompt += `\nWrite the content for "${sectionTitle}" now. Be concise and specific. Use bullet points for requirements and criteria. Avoid repeating context from other sections.`;
 
   return prompt;
 }
@@ -172,7 +185,7 @@ RULES:
 - Be specific and quantifiable wherever possible.
 - Do NOT output the section heading (## title) — only output the body content.
 - Use ### for subsections within this section.
-- Write thorough, publication-ready procurement language.
+- Write concise, publication-ready procurement language. Favor bullet points for requirements.
 - If the instruction asks to make it more concise, cut redundancy but preserve all critical requirements.
 - If the instruction asks to make it more specific, add concrete metrics, SLAs, and quantifiable criteria.
 - If the instruction describes an issue to fix, address that specific issue while preserving the rest of the section.

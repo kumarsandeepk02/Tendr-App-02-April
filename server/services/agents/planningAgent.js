@@ -1,6 +1,12 @@
 const { agentCall } = require('../claudeService');
 
-const PLANNING_AGENT_SYSTEM = `You are an expert procurement consultant acting as a Planning Agent. Your role is to have a natural, freeform conversation with the user to understand their procurement needs before generating a document.
+const PLANNING_AGENT_SYSTEM = `You are Priya, a sharp and friendly procurement analyst. You work as the Planning Agent on a team that creates professional RFP and RFI documents. Your role is to have a natural, freeform conversation with the user to understand their procurement needs before handing off to the Writing Team for document generation.
+
+PERSONA:
+- Your name is Priya. You may introduce yourself in your first message if the conversation context calls for it.
+- You speak like a knowledgeable junior analyst in a first prep meeting — curious, organized, and direct.
+- You are warm but professional. You do not use excessive exclamation points or emoji.
+- You actively gather information and ask smart follow-up questions.
 
 BEHAVIORAL RULES:
 1. Be conversational and proactive — ask smart follow-up questions based on what the user says.
@@ -15,11 +21,12 @@ BEHAVIORAL RULES:
 10. If the user says something like "that's all" or "let's go" or "generate", that's your cue to suggest creating the brief.
 
 PROACTIVE BEHAVIORS:
+- DOCUMENT PROBING (IMPORTANT): In your FIRST or SECOND response, always ask the user whether they have any existing documents to share. Frame it naturally: "By the way — do you have any existing documents I can review? A scope of work, previous RFP, project brief, or vendor contract would help me draft more accurately." Only ask once — do not repeat if they decline or ignore.
 - If the user mentions an industry, acknowledge it and ask about industry-specific needs (compliance, regulations, etc.)
 - If they mention a timeline, ask about phasing or milestones
 - If they mention requirements, ask about must-haves vs nice-to-haves
 - If they mention budget, ask about pricing structure expectations (fixed, T&M, etc.)
-- Suggest uploading documents if the user mentions existing specs, SOWs, or previous RFPs
+- If the user mentions existing specs, SOWs, or previous RFPs, remind them they can upload documents directly using the upload button
 
 OUTPUT FORMAT:
 Respond with ONLY your conversational message. No JSON, no markdown headers, no structured data.`;
@@ -161,4 +168,67 @@ const NARRATION_PROMPTS = {
     `Analyzing competitive landscape and industry benchmarks...`,
 };
 
-module.exports = { planningChat, generateBrief, NARRATION_PROMPTS };
+/**
+ * Generate contextual narration lines for each section — one LLM call upfront.
+ * Returns a map of { "Section Title": "contextual narration string" }.
+ */
+const NARRATION_GEN_SYSTEM = `You are writing brief, contextual progress messages for a document generation UI.
+The user will see these messages while their procurement document is being written section by section.
+
+Each message should:
+- Reference specific details from the project (company names, technologies, compliance standards, etc.)
+- Be 1 sentence, under 20 words
+- Sound like a knowledgeable analyst working on their document
+- Not repeat the same phrasing across messages
+- Start with a verb (e.g. "Drafting...", "Incorporating...", "Building...")
+
+OUTPUT FORMAT: Return a JSON object with section titles as keys and narration strings as values.
+Return ONLY the JSON, no markdown fences.`;
+
+async function generateNarrations({ brief, messages, model }) {
+  const sectionTitles = (brief.suggestedSections || [])
+    .filter(s => s.included !== false)
+    .map(s => s.title);
+
+  if (sectionTitles.length === 0) return {};
+
+  let userPrompt = `Generate a contextual narration message for each of these document sections. The message appears while the AI writes that section.\n\n`;
+  userPrompt += `Project: ${brief.projectTitle || 'Untitled'}\n`;
+  userPrompt += `Description: ${brief.projectDescription || ''}\n`;
+  userPrompt += `Key requirements: ${(brief.requirements || []).join('; ')}\n`;
+  userPrompt += `Industry: ${brief.industry || 'General'}\n\n`;
+
+  // Include key conversation points
+  if (messages && messages.length > 0) {
+    const userMsgs = messages.filter(m => m.role === 'user').slice(0, 5);
+    if (userMsgs.length > 0) {
+      userPrompt += `Key conversation points:\n`;
+      for (const msg of userMsgs) {
+        userPrompt += `- ${msg.content.substring(0, 200)}\n`;
+      }
+      userPrompt += '\n';
+    }
+  }
+
+  userPrompt += `Sections:\n${sectionTitles.map((t, i) => `${i + 1}. ${t}`).join('\n')}\n\n`;
+  userPrompt += `Generate a contextual narration for each section. Example:\n{"Background / Project Overview": "Drafting the project background — incorporating the ACME Corp cloud migration context"}\n\nReturn ONLY the JSON.`;
+
+  try {
+    const response = await agentCall(NARRATION_GEN_SYSTEM, userPrompt, {
+      maxTokens: 1000,
+      temperature: 0.6,
+      model,
+    });
+
+    let jsonStr = response;
+    const fenceMatch = response.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (fenceMatch) jsonStr = fenceMatch[1].trim();
+
+    return JSON.parse(jsonStr);
+  } catch (err) {
+    console.warn('Narration generation failed, using defaults:', err.message);
+    return {};
+  }
+}
+
+module.exports = { planningChat, generateBrief, generateNarrations, NARRATION_PROMPTS };
