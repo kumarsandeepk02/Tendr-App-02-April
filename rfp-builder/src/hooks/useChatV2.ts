@@ -5,7 +5,6 @@ import {
   ChatRole,
   V2Phase,
   BriefData,
-  BriefSection,
   NarrationMessage,
   QualityReview,
   UploadedDocument,

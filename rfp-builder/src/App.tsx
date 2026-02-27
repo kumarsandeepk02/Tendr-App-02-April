@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { V2Phase } from './types';
 import { useChatV2 } from './hooks/useChatV2';
 import { useDocument } from './hooks/useDocument';
@@ -33,8 +33,6 @@ function App() {
     createProject,
     switchProject,
     deleteProject,
-    saveProject,
-    loadProject,
     syncProjectMeta,
   } = useProjects();
 
@@ -46,7 +44,6 @@ function App() {
     addSection,
     removeSection,
     reorderSections,
-    parseSectionsFromMarkdown,
     resetDocument,
     restoreDocument,
     completedSections,
