@@ -151,6 +151,10 @@ function App() {
     copilotEdit,
     fixIssue,
     fixAllErrors,
+    // Model selection
+    availableModels,
+    selectedModel,
+    setSelectedModel,
   } = useChat(chatOptions);
 
   // Keep ref in sync with uploadedDocuments to avoid infinite re-render loops in save callbacks
@@ -316,6 +320,9 @@ function App() {
         isGenerating={isGenerating}
         onReset={handleNewProject}
         onExportComplete={handleExportComplete}
+        availableModels={availableModels}
+        selectedModel={selectedModel}
+        onSelectModel={setSelectedModel}
       />
 
       {/* Main Content: Sidebar + Adaptive Layout */}

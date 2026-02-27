@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { DocumentState } from '../types';
+import { DocumentState, ModelOption } from '../types';
 import { exportToDocx } from '../utils/exportDocx';
 import { exportToPdf } from '../utils/exportPdf';
+import ModelSelector from './ModelSelector';
 import {
   FileDown,
   FileText,
@@ -14,6 +15,9 @@ interface ToolbarProps {
   isGenerating: boolean;
   onReset: () => void;
   onExportComplete: () => void;
+  availableModels: ModelOption[];
+  selectedModel: string;
+  onSelectModel: (modelKey: string) => void;
 }
 
 const Toolbar: React.FC<ToolbarProps> = ({
@@ -21,6 +25,9 @@ const Toolbar: React.FC<ToolbarProps> = ({
   isGenerating,
   onReset,
   onExportComplete,
+  availableModels,
+  selectedModel,
+  onSelectModel,
 }) => {
   const [exportingDocx, setExportingDocx] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
@@ -68,8 +75,17 @@ const Toolbar: React.FC<ToolbarProps> = ({
         </h1>
       </div>
 
-      {/* Right: Export + Reset */}
+      {/* Right: Model selector + Export + Reset */}
       <div className="flex items-center gap-2">
+        <ModelSelector
+          models={availableModels}
+          selectedModel={selectedModel}
+          onSelectModel={onSelectModel}
+          disabled={isGenerating}
+        />
+
+        <div className="w-px h-6 bg-gray-200 mx-1" />
+
         {exportError && (
           <span className="text-xs text-red-500 mr-2">{exportError}</span>
         )}

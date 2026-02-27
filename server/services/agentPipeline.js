@@ -24,7 +24,7 @@ const MAX_TOTAL_CHARS = 100000; // ~25k tokens
  * @param {Object} callbacks Event callbacks
  */
 async function runPipeline(config, callbacks) {
-  const { answers, fileContext, docType, confirmedSections, uploadedDocuments } = config;
+  const { answers, fileContext, docType, confirmedSections, uploadedDocuments, model } = config;
   const { onSectionStart, onText, onSectionDone, onDone, onReview, onDocumentAnalysis, onCompetitiveIntel, onError } = callbacks;
 
   let fullDocument = '';
@@ -37,6 +37,7 @@ async function runPipeline(config, callbacks) {
       fileContext,
       docType,
       confirmedSections,
+      model,
     });
 
     const total = outline.length;
@@ -78,6 +79,7 @@ async function runPipeline(config, callbacks) {
             previousSections: completedSections.slice(-3), // Last 3 sections for continuity
             industryProfile: industry,
             estimatedLength: section.estimatedLength,
+            model,
           },
           (chunk) => {
             totalChars += chunk.length;
@@ -108,7 +110,7 @@ async function runPipeline(config, callbacks) {
     // Phase 3: Quality Reviewer (async — fire and forget)
     // NOTE: Always call the callback (with null on failure) so the route handler
     // can decrement asyncPending via tryClose() and properly close the SSE connection.
-    reviewDocument({ fullDocument, answers, docType, industryProfile: industry })
+    reviewDocument({ fullDocument, answers, docType, industryProfile: industry, model })
       .then((review) => {
         if (onReview) onReview(review || null);
       })
@@ -118,7 +120,7 @@ async function runPipeline(config, callbacks) {
       });
 
     // Phase 4: Competitive Intelligence (async — fire and forget)
-    generateCompetitiveIntel({ docType, answers, industryProfile: industry })
+    generateCompetitiveIntel({ docType, answers, industryProfile: industry, model })
       .then((intel) => {
         if (onCompetitiveIntel) onCompetitiveIntel(intel || null);
       })
@@ -129,7 +131,7 @@ async function runPipeline(config, callbacks) {
 
     // Phase 5: Document Analysis — only if multiple documents uploaded
     if (uploadedDocuments && uploadedDocuments.length > 0 && completedSections.length > 0) {
-      analyzeDocuments({ documents: uploadedDocuments, generatedSections: completedSections, docType, answers })
+      analyzeDocuments({ documents: uploadedDocuments, generatedSections: completedSections, docType, answers, model })
         .then((analysis) => {
           if (onDocumentAnalysis) onDocumentAnalysis(analysis || null);
         })

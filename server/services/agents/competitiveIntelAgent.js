@@ -38,7 +38,7 @@ Return ONLY the JSON object, no other text.`;
  * @param {Object|null} config.industryProfile Detected industry profile
  * @returns {Promise<Object|null>} Competitive intelligence or null on failure
  */
-async function generateCompetitiveIntel({ docType, answers, industryProfile }) {
+async function generateCompetitiveIntel({ docType, answers, industryProfile, model }) {
   const docLabel = docType === 'RFI' ? 'Request for Information' : 'Request for Proposal';
 
   let userPrompt = `Provide competitive intelligence for a ${docLabel} (${docType}) with the following context:\n\n`;
@@ -66,7 +66,7 @@ async function generateCompetitiveIntel({ docType, answers, industryProfile }) {
   userPrompt += `Provide competitive intelligence as JSON. Focus on actionable, specific insights that will make this ${docType} more rigorous.`;
 
   try {
-    const response = await agentCall(INTEL_SYSTEM_PROMPT, userPrompt, { maxTokens: 2000, temperature: 0.3 });
+    const response = await agentCall(INTEL_SYSTEM_PROMPT, userPrompt, { maxTokens: 2000, temperature: 0.3, model });
 
     // Parse JSON — handle possible markdown fences
     let jsonStr = response;

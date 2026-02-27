@@ -46,7 +46,7 @@ Return ONLY the JSON object, no other text.`;
  * @param {Object|null} config.industryProfile Detected industry profile
  * @returns {Promise<Object|null>} Quality review result or null on failure
  */
-async function reviewDocument({ fullDocument, answers, docType, industryProfile }) {
+async function reviewDocument({ fullDocument, answers, docType, industryProfile, model }) {
   const docLabel = docType === 'RFI' ? 'Request for Information' : 'Request for Proposal';
 
   let userPrompt = `Review this ${docLabel} (${docType}) document for quality and completeness.\n\n`;
@@ -76,7 +76,7 @@ async function reviewDocument({ fullDocument, answers, docType, industryProfile 
   userPrompt += `DOCUMENT TO REVIEW:\n\n${truncatedDoc}\n\nProvide your quality review as JSON.`;
 
   try {
-    const response = await agentCall(REVIEW_SYSTEM_PROMPT, userPrompt, { maxTokens: 2000, temperature: 0.2 });
+    const response = await agentCall(REVIEW_SYSTEM_PROMPT, userPrompt, { maxTokens: 2000, temperature: 0.2, model });
 
     // Parse JSON — handle possible markdown fences
     let jsonStr = response;

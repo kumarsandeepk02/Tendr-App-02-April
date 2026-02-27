@@ -75,7 +75,7 @@ const DEFAULT_OUTLINE = [
  * If confirmedSections are provided, uses those titles and adds metadata.
  * Otherwise, asks Claude for a tailored outline.
  */
-async function generateOutline({ answers, fileContext, docType, confirmedSections }) {
+async function generateOutline({ answers, fileContext, docType, confirmedSections, model }) {
   const industry = detectIndustry(answers || {});
 
   // If user already confirmed sections from the client-side outline, enrich with metadata
@@ -135,7 +135,7 @@ Return ONLY the JSON array, no other text.`;
   const systemPrompt = `You are an expert procurement document architect. Your job is to design the optimal section structure for procurement documents. Return ONLY valid JSON — no markdown fences, no explanations, just the array.`;
 
   try {
-    const response = await agentCall(systemPrompt, userPrompt, { maxTokens: 2000, temperature: 0.3 });
+    const response = await agentCall(systemPrompt, userPrompt, { maxTokens: 2000, temperature: 0.3, model });
 
     // Parse JSON — handle possible markdown fences
     let jsonStr = response;

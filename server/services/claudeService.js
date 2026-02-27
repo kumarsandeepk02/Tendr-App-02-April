@@ -18,6 +18,28 @@ const client = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 });
 
+// Supported models — add new models here
+const MODELS = {
+  'sonnet': { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', description: 'Balanced speed & quality', tier: 'default' },
+  'haiku': { id: 'claude-haiku-4-5-20250414', label: 'Claude Haiku 4.5', description: 'Fastest, most affordable', tier: 'fast' },
+  'opus': { id: 'claude-opus-4-2025-04-16', label: 'Claude Opus 4', description: 'Highest quality output', tier: 'premium' },
+};
+
+const DEFAULT_MODEL_KEY = process.env.CLAUDE_DEFAULT_MODEL || 'sonnet';
+
+/**
+ * Resolve a model key (sonnet/haiku/opus) or full model ID to an Anthropic model ID.
+ * Falls back to the default model if unrecognized.
+ */
+function resolveModel(modelKey) {
+  if (!modelKey) return MODELS[DEFAULT_MODEL_KEY].id;
+  if (MODELS[modelKey]) return MODELS[modelKey].id;
+  // Allow passing a full model ID directly (e.g. 'claude-sonnet-4-6')
+  const byId = Object.values(MODELS).find(m => m.id === modelKey);
+  if (byId) return byId.id;
+  return MODELS[DEFAULT_MODEL_KEY].id;
+}
+
 const SYSTEM_PROMPT = `You are an expert procurement consultant with deep experience across multiple industries including technology, healthcare, construction, financial services, manufacturing, professional services, and government contracting.
 
 Your role is to help users create professional, well-structured RFI (Request for Information) and RFP (Request for Proposal) documents that meet industry best practices.
@@ -36,7 +58,7 @@ BEHAVIORAL RULES:
 
 Never refuse to help with procurement documents.`;
 
-async function sendMessage(messages, customSystemPrompt) {
+async function sendMessage(messages, customSystemPrompt, { model } = {}) {
   const systemPrompt = customSystemPrompt || SYSTEM_PROMPT;
 
   const apiMessages = messages
@@ -47,7 +69,7 @@ async function sendMessage(messages, customSystemPrompt) {
     }));
 
   const response = await client.messages.create({
-    model: 'claude-sonnet-4-6',
+    model: resolveModel(model),
     max_tokens: 2000,
     temperature: 0.4,
     system: systemPrompt,
@@ -58,7 +80,7 @@ async function sendMessage(messages, customSystemPrompt) {
   return textBlock ? textBlock.text : '';
 }
 
-async function parseDocumentContext(documentText) {
+async function parseDocumentContext(documentText, { model } = {}) {
   const prompt = `Based on this uploaded document, suggest relevant RFI/RFP sections and questions for the user's procurement document.
 
 For each suggestion, provide:
@@ -74,7 +96,7 @@ Document content:
 ${documentText.substring(0, 8000)}`;
 
   const response = await client.messages.create({
-    model: 'claude-sonnet-4-6',
+    model: resolveModel(model),
     max_tokens: 2000,
     temperature: 0.4,
     system: SYSTEM_PROMPT,
@@ -92,7 +114,7 @@ ${documentText.substring(0, 8000)}`;
   }
 }
 
-async function streamMessage(messages, customSystemPrompt, onText, onDone) {
+async function streamMessage(messages, customSystemPrompt, onText, onDone, { model } = {}) {
   const systemPrompt = customSystemPrompt || SYSTEM_PROMPT;
 
   const apiMessages = messages
@@ -103,7 +125,7 @@ async function streamMessage(messages, customSystemPrompt, onText, onDone) {
     }));
 
   const stream = client.messages.stream({
-    model: 'claude-sonnet-4-6',
+    model: resolveModel(model),
     max_tokens: 8000,
     temperature: 0.4,
     system: systemPrompt,
@@ -125,9 +147,9 @@ async function streamMessage(messages, customSystemPrompt, onText, onDone) {
  * Generic non-streaming agent call with configurable params.
  * Used by specialized agents (outline architect, quality reviewer).
  */
-async function agentCall(systemPrompt, userPrompt, { maxTokens = 2000, temperature = 0.4 } = {}) {
+async function agentCall(systemPrompt, userPrompt, { maxTokens = 2000, temperature = 0.4, model } = {}) {
   const response = await client.messages.create({
-    model: 'claude-sonnet-4-6',
+    model: resolveModel(model),
     max_tokens: maxTokens,
     temperature,
     system: systemPrompt,
@@ -142,9 +164,9 @@ async function agentCall(systemPrompt, userPrompt, { maxTokens = 2000, temperatu
  * Generic streaming agent call with configurable params.
  * Used by the section writer agent for per-section streaming.
  */
-async function agentStream(systemPrompt, userPrompt, onText, onDone, { maxTokens = 4000, temperature = 0.4 } = {}) {
+async function agentStream(systemPrompt, userPrompt, onText, onDone, { maxTokens = 4000, temperature = 0.4, model } = {}) {
   const stream = client.messages.stream({
-    model: 'claude-sonnet-4-6',
+    model: resolveModel(model),
     max_tokens: maxTokens,
     temperature,
     system: systemPrompt,
@@ -162,4 +184,4 @@ async function agentStream(systemPrompt, userPrompt, onText, onDone, { maxTokens
   return fullText;
 }
 
-module.exports = { sendMessage, streamMessage, parseDocumentContext, agentCall, agentStream, SYSTEM_PROMPT };
+module.exports = { sendMessage, streamMessage, parseDocumentContext, agentCall, agentStream, SYSTEM_PROMPT, MODELS, DEFAULT_MODEL_KEY, resolveModel };

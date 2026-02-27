@@ -35,7 +35,7 @@ Return ONLY the JSON object, no other text.`;
  * @param {Object} config.answers Gathered answers from the user
  * @returns {Promise<Object|null>} Analysis result or null on failure
  */
-async function analyzeDocuments({ documents, generatedSections, docType, answers }) {
+async function analyzeDocuments({ documents, generatedSections, docType, answers, model }) {
   if (!documents || documents.length < 1 || !generatedSections || generatedSections.length === 0) {
     return null;
   }
@@ -73,7 +73,7 @@ async function analyzeDocuments({ documents, generatedSections, docType, answers
   userPrompt += `Provide your cross-reference analysis as JSON.`;
 
   try {
-    const response = await agentCall(ANALYZER_SYSTEM_PROMPT, userPrompt, { maxTokens: 2000, temperature: 0.2 });
+    const response = await agentCall(ANALYZER_SYSTEM_PROMPT, userPrompt, { maxTokens: 2000, temperature: 0.2, model });
 
     // Parse JSON — handle possible markdown fences
     let jsonStr = response;

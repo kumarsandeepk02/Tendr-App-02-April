@@ -97,6 +97,7 @@ async function writeSection(config, onText, onDone) {
     previousSections,
     industryProfile,
     estimatedLength = 'medium',
+    model,
   } = config;
 
   const systemPrompt = buildSectionSystemPrompt(docType, industryProfile);
@@ -126,7 +127,7 @@ async function writeSection(config, onText, onDone) {
     () => {
       // Stream complete — onDone is called below with full content
     },
-    { maxTokens, temperature: 0.4 }
+    { maxTokens, temperature: 0.4, model }
   );
 
   const completeSection = heading + fullText;
@@ -157,6 +158,7 @@ async function regenerateSection(config, onText, onDone) {
     docType,
     answers,
     fileContext,
+    model,
   } = config;
 
   const docLabel = docType === 'RFI' ? 'Request for Information' : 'Request for Proposal';
@@ -207,7 +209,7 @@ ${currentContent}`;
       if (onText) onText(chunk);
     },
     () => {},
-    { maxTokens: 4000, temperature: 0.4 }
+    { maxTokens: 4000, temperature: 0.4, model }
   );
 
   if (onDone) onDone(fullText);

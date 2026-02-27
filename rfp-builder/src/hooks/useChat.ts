@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import axios from 'axios';
-import { ChatMessage, GuidedStep, ChatRole, UnifiedFlowPhase, OutlineSection, QualityReview, UploadedDocument, DocumentAnalysis, CompetitiveIntelligence } from '../types';
+import { ChatMessage, GuidedStep, ChatRole, UnifiedFlowPhase, OutlineSection, QualityReview, UploadedDocument, DocumentAnalysis, CompetitiveIntelligence, ModelOption } from '../types';
 import {
   GUIDED_QUESTIONS,
   WELCOME_MESSAGE,
@@ -49,9 +49,44 @@ export function useChat(options?: UseChatOptions) {
   const [uploadedDocuments, setUploadedDocuments] = useState<UploadedDocument[]>([]);
   const [outlineSections, setOutlineSections] = useState<OutlineSection[]>([]);
   const [isOutlineLoading, setIsOutlineLoading] = useState(false);
+  const [availableModels, setAvailableModels] = useState<ModelOption[]>([]);
+  const [selectedModel, setSelectedModel] = useState<string>(() => {
+    return localStorage.getItem('rfp_selected_model') || '';
+  });
   const fileContextRef = useRef<string | undefined>(undefined);
   const optionsRef = useRef(options);
   optionsRef.current = options;
+
+  // Fetch available models on mount
+  useEffect(() => {
+    axios.get(`${API_URL}/api/chat/models`)
+      .then((res) => {
+        const data = res.data;
+        setAvailableModels(data.models || []);
+        // If no model selected yet, use the default
+        if (!selectedModel && data.default) {
+          setSelectedModel(data.default);
+        }
+      })
+      .catch((err) => {
+        console.warn('Failed to fetch models:', err);
+        // Fallback: provide a default model list
+        setAvailableModels([
+          { key: 'sonnet', id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', description: 'Balanced speed & quality', tier: 'default', isDefault: true },
+          { key: 'haiku', id: 'claude-haiku-4-5-20250414', label: 'Claude Haiku 4.5', description: 'Fastest, most affordable', tier: 'fast', isDefault: false },
+          { key: 'opus', id: 'claude-opus-4-2025-04-16', label: 'Claude Opus 4', description: 'Highest quality output', tier: 'premium', isDefault: false },
+        ]);
+        if (!selectedModel) setSelectedModel('sonnet');
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Persist model selection
+  useEffect(() => {
+    if (selectedModel) {
+      localStorage.setItem('rfp_selected_model', selectedModel);
+    }
+  }, [selectedModel]);
 
   // Autosave chat state (including gatheredAnswers and uploadedFileText)
   useEffect(() => {
@@ -128,6 +163,7 @@ export function useChat(options?: UseChatOptions) {
         const res = await axios.post(`${API_URL}/api/chat`, {
           messages: apiMessages,
           systemPrompt: systemAddendum || undefined,
+          model: selectedModel || undefined,
         });
 
         const assistantContent = res.data.content;
@@ -160,7 +196,7 @@ export function useChat(options?: UseChatOptions) {
         setIsTyping(false);
       }
     },
-    [guidedStep]
+    [guidedStep, selectedModel]
   );
 
   // Generate a contextual follow-up question using Claude (for adaptive Q&A)
@@ -171,6 +207,7 @@ export function useChat(options?: UseChatOptions) {
         const res = await axios.post(`${API_URL}/api/chat`, {
           messages: [{ role: 'user', content: prompt }],
           systemPrompt: 'You are helping a user build a procurement document. Generate exactly ONE contextual follow-up question. Output ONLY the question text, nothing else. Use **bold** for key terms. Max 2 sentences.',
+          model: selectedModel || undefined,
         });
         const question = res.data.content?.trim();
         return question && question.length > 10 ? question : null;
@@ -178,7 +215,7 @@ export function useChat(options?: UseChatOptions) {
         return null;
       }
     },
-    [gatheredAnswers]
+    [gatheredAnswers, selectedModel]
   );
 
   // Advance to the next guided step (or transition to upload_prompt if done)
@@ -456,6 +493,7 @@ export function useChat(options?: UseChatOptions) {
         body: JSON.stringify({
           messages: apiMessages,
           systemPrompt,
+          model: selectedModel || undefined,
         }),
       });
 
@@ -465,7 +503,7 @@ export function useChat(options?: UseChatOptions) {
 
       await readSSEStream(response, false);
     },
-    [gatheredAnswers, messages, readSSEStream]
+    [gatheredAnswers, messages, readSSEStream, selectedModel]
   );
 
   // Pipeline-based generation (multi-agent)
@@ -482,6 +520,7 @@ export function useChat(options?: UseChatOptions) {
           docType,
           confirmedSections,
           uploadedDocuments: uploadedDocuments.map((d) => ({ name: d.name, text: d.text })),
+          model: selectedModel || undefined,
         }),
       });
 
@@ -498,7 +537,7 @@ export function useChat(options?: UseChatOptions) {
           const intelRes = await fetch(`${API_URL}/api/chat/competitive-intel`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ docType, answers: gatheredAnswers }),
+            body: JSON.stringify({ docType, answers: gatheredAnswers, model: selectedModel || undefined }),
           });
           if (intelRes.ok) {
             const intel = await intelRes.json();
@@ -515,7 +554,7 @@ export function useChat(options?: UseChatOptions) {
       // generatedSections which aren't available in this scope. The SSE delivery
       // for document_analysis is more reliable since it arrives with the stream.
     },
-    [gatheredAnswers, uploadedDocuments, readSSEStream]
+    [gatheredAnswers, uploadedDocuments, readSSEStream, selectedModel]
   );
 
   // Stream-based generation — uses pipeline or monolithic based on feature flag
@@ -582,6 +621,7 @@ export function useChat(options?: UseChatOptions) {
         const res = await axios.post(`${API_URL}/api/chat`, {
           messages: [{ role: 'user', content: outlinePrompt }],
           systemPrompt: 'You are an expert procurement consultant. Return ONLY a valid JSON array as requested. No other text.',
+          model: selectedModel || undefined,
         });
 
         const content = res.data.content || '';
@@ -627,7 +667,7 @@ export function useChat(options?: UseChatOptions) {
         setIsOutlineLoading(false);
       }
     },
-    [gatheredAnswers, addMessage, streamGenerate]
+    [gatheredAnswers, addMessage, streamGenerate, selectedModel]
   );
 
   // Trigger generation — now goes through outline step first
@@ -698,6 +738,7 @@ export function useChat(options?: UseChatOptions) {
             docType,
             answers: gatheredAnswers,
             fileContext: uploadedFileText || undefined,
+            model: selectedModel || undefined,
           }),
         });
 
@@ -751,7 +792,7 @@ export function useChat(options?: UseChatOptions) {
         return null;
       }
     },
-    [gatheredAnswers, uploadedFileText]
+    [gatheredAnswers, uploadedFileText, selectedModel]
   );
 
   /**
@@ -779,6 +820,7 @@ export function useChat(options?: UseChatOptions) {
             docType,
             answers: gatheredAnswers,
             fileContext: uploadedFileText || undefined,
+            model: selectedModel || undefined,
           }),
         });
 
@@ -827,7 +869,7 @@ export function useChat(options?: UseChatOptions) {
         return null;
       }
     },
-    [gatheredAnswers, uploadedFileText]
+    [gatheredAnswers, uploadedFileText, selectedModel]
   );
 
   /**
@@ -937,5 +979,9 @@ export function useChat(options?: UseChatOptions) {
     copilotEdit,
     fixIssue,
     fixAllErrors,
+    // Model selection
+    availableModels,
+    selectedModel,
+    setSelectedModel,
   };
 }

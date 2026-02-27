@@ -1,20 +1,33 @@
 const express = require('express');
 const router = express.Router();
-const { sendMessage, streamMessage } = require('../services/claudeService');
+const { sendMessage, streamMessage, MODELS, DEFAULT_MODEL_KEY } = require('../services/claudeService');
 const { runPipeline } = require('../services/agentPipeline');
 const { regenerateSection } = require('../services/agents/sectionWriter');
 const { analyzeDocuments } = require('../services/agents/documentAnalyzer');
 const { generateCompetitiveIntel } = require('../services/agents/competitiveIntelAgent');
 
+// GET available models
+router.get('/models', (req, res) => {
+  const models = Object.entries(MODELS).map(([key, m]) => ({
+    key,
+    id: m.id,
+    label: m.label,
+    description: m.description,
+    tier: m.tier,
+    isDefault: key === DEFAULT_MODEL_KEY,
+  }));
+  res.json({ models, default: DEFAULT_MODEL_KEY });
+});
+
 router.post('/', async (req, res) => {
   try {
-    const { messages, systemPrompt } = req.body;
+    const { messages, systemPrompt, model } = req.body;
 
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
       return res.status(400).json({ error: 'Messages array is required' });
     }
 
-    const content = await sendMessage(messages, systemPrompt);
+    const content = await sendMessage(messages, systemPrompt, { model });
     res.json({ content });
   } catch (error) {
     console.error('Chat API error:', error.message);
@@ -27,7 +40,7 @@ router.post('/', async (req, res) => {
 // SSE streaming endpoint for freeform document generation
 router.post('/stream', async (req, res) => {
   try {
-    const { messages, systemPrompt } = req.body;
+    const { messages, systemPrompt, model } = req.body;
 
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
       return res.status(400).json({ error: 'Messages array is required' });
@@ -49,7 +62,8 @@ router.post('/stream', async (req, res) => {
       (fullText) => {
         res.write(`data: ${JSON.stringify({ type: 'done', content: fullText })}\n\n`);
         res.end();
-      }
+      },
+      { model }
     );
   } catch (error) {
     console.error('Stream API error:', error.message);
@@ -68,7 +82,7 @@ router.post('/stream', async (req, res) => {
 // Multi-agent pipeline SSE endpoint
 router.post('/pipeline', async (req, res) => {
   try {
-    const { answers, fileContext, docType, confirmedSections, uploadedDocuments } = req.body;
+    const { answers, fileContext, docType, confirmedSections, uploadedDocuments, model } = req.body;
 
     if (!answers || !docType) {
       return res.status(400).json({ error: 'answers and docType are required' });
@@ -93,7 +107,7 @@ router.post('/pipeline', async (req, res) => {
     };
 
     await runPipeline(
-      { answers, fileContext, docType, confirmedSections, uploadedDocuments },
+      { answers, fileContext, docType, confirmedSections, uploadedDocuments, model },
       {
         onSectionStart: (title, index, total) => {
           res.write(`data: ${JSON.stringify({ type: 'section_start', title, index, total })}\n\n`);
@@ -153,7 +167,7 @@ router.post('/pipeline', async (req, res) => {
 // Section regeneration SSE endpoint (shared by section regen + quality review fix)
 router.post('/regenerate-section', async (req, res) => {
   try {
-    const { sectionTitle, currentContent, instruction, docType, answers, fileContext } = req.body;
+    const { sectionTitle, currentContent, instruction, docType, answers, fileContext, model } = req.body;
 
     if (!sectionTitle || !instruction) {
       return res.status(400).json({ error: 'sectionTitle and instruction are required' });
@@ -167,7 +181,7 @@ router.post('/regenerate-section', async (req, res) => {
     res.flushHeaders();
 
     await regenerateSection(
-      { sectionTitle, currentContent, instruction, docType, answers, fileContext },
+      { sectionTitle, currentContent, instruction, docType, answers, fileContext, model },
       (chunk) => {
         res.write(`data: ${JSON.stringify({ type: 'text', content: chunk })}\n\n`);
       },
@@ -190,7 +204,7 @@ router.post('/regenerate-section', async (req, res) => {
 // Document analysis endpoint (cross-reference uploaded docs with generated sections)
 router.post('/analyze-documents', async (req, res) => {
   try {
-    const { documents, generatedSections, docType, answers } = req.body;
+    const { documents, generatedSections, docType, answers, model } = req.body;
 
     if (!documents || !Array.isArray(documents) || documents.length === 0) {
       return res.status(400).json({ error: 'documents array is required' });
@@ -199,7 +213,7 @@ router.post('/analyze-documents', async (req, res) => {
       return res.status(400).json({ error: 'generatedSections array is required' });
     }
 
-    const result = await analyzeDocuments({ documents, generatedSections, docType, answers });
+    const result = await analyzeDocuments({ documents, generatedSections, docType, answers, model });
 
     if (result) {
       res.json(result);
@@ -215,13 +229,13 @@ router.post('/analyze-documents', async (req, res) => {
 // Competitive intelligence endpoint
 router.post('/competitive-intel', async (req, res) => {
   try {
-    const { docType, answers, industryProfile } = req.body;
+    const { docType, answers, industryProfile, model } = req.body;
 
     if (!docType || !answers) {
       return res.status(400).json({ error: 'docType and answers are required' });
     }
 
-    const result = await generateCompetitiveIntel({ docType, answers, industryProfile });
+    const result = await generateCompetitiveIntel({ docType, answers, industryProfile, model });
 
     if (result) {
       res.json(result);

@@ -232,6 +232,17 @@ export interface CompetitiveIntelligence {
   suggestedRequirements: SuggestedRequirement[];
 }
 
+// ===================== Model Types =====================
+
+export interface ModelOption {
+  key: string;
+  id: string;
+  label: string;
+  description: string;
+  tier: string;
+  isDefault: boolean;
+}
+
 // ===================== Onboarding =====================
 
 export type OnboardingStep = 1 | 2 | 3;
