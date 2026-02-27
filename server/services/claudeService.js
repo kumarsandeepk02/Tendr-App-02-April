@@ -146,14 +146,20 @@ async function streamMessage(messages, customSystemPrompt, onText, onDone, { mod
 /**
  * Generic non-streaming agent call with configurable params.
  * Used by specialized agents (outline architect, quality reviewer).
+ * userPrompt can be a string (single user message) or an array of {role, content} messages.
  */
-async function agentCall(systemPrompt, userPrompt, { maxTokens = 2000, temperature = 0.4, model } = {}) {
+async function agentCall(systemPrompt, userPrompt, { maxTokens = 2000, temperature = 0.4, model, isConversation } = {}) {
+  // Support both single-string prompts and conversation-style message arrays
+  const messages = isConversation && Array.isArray(userPrompt)
+    ? userPrompt.filter(m => m.role !== 'system').map(m => ({ role: m.role, content: m.content }))
+    : [{ role: 'user', content: userPrompt }];
+
   const response = await client.messages.create({
     model: resolveModel(model),
     max_tokens: maxTokens,
     temperature,
     system: systemPrompt,
-    messages: [{ role: 'user', content: userPrompt }],
+    messages,
   });
 
   const textBlock = response.content.find((block) => block.type === 'text');

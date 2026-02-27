@@ -1,35 +1,21 @@
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { SectionSuggestion, UploadedDocument } from './types';
-import { useChat } from './hooks/useChat';
+import { V2Phase } from './types';
+import { useChatV2 } from './hooks/useChatV2';
 import { useDocument } from './hooks/useDocument';
 import { useProjects } from './hooks/useProjects';
-import Chat from './components/Chat';
 import DocumentPreview from './components/DocumentPreview';
 import Toolbar from './components/Toolbar';
 import Sidebar from './components/Sidebar';
-import Onboarding from './components/Onboarding';
-import FileUploader from './components/FileUploader';
 import FeedbackToast from './components/FeedbackToast';
+import LandingPage from './components/v2/LandingPage';
+import PlanningChat from './components/v2/PlanningChat';
+import BriefReview from './components/v2/BriefReview';
+import GenerationNarrator from './components/v2/GenerationNarrator';
 import './index.css';
 
 function App() {
-  // Onboarding
-  const [showOnboarding, setShowOnboarding] = useState(() => {
-    return !localStorage.getItem('rfp_onboarded');
-  });
-
-  // File uploader
-  const [showUploader, setShowUploader] = useState(false);
-
   // Feedback
   const [showFeedback, setShowFeedback] = useState(false);
-
-  // Track if flow has been started (use ref to survive StrictMode double-render)
-  const flowStartedRef = useRef(false);
-  const [resetCounter, setResetCounter] = useState(0);
-
-  // Ref to capture uploadedDocuments for save callbacks without causing re-render loops
-  const uploadedDocumentsRef = useRef<UploadedDocument[]>([]);
 
   // Sidebar collapse state
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
@@ -96,12 +82,9 @@ function App() {
     findSectionByTitle,
   } = useDocument(activeProjectId);
 
-  // Chat options (memoized to prevent infinite re-renders)
+  // V2 Chat options
   const chatOptions = useMemo(
     () => ({
-      onSectionsUpdate: (markdown: string) => {
-        parseSectionsFromMarkdown(markdown);
-      },
       onMetaUpdate: (updates: Record<string, string>) => {
         updateMeta(updates as any);
       },
@@ -117,36 +100,31 @@ function App() {
       onCompetitiveIntel: handleCompetitiveIntel,
       projectId: activeProjectId,
     }),
-    [parseSectionsFromMarkdown, updateMeta, handleStreamStart, handleStreamChunk, handleStreamDone, handleSectionStart, handleSectionDone, handleReviewResult, handleSectionRegenerationStart, handleSectionRegenerationDone, handleDocumentAnalysis, handleCompetitiveIntel, activeProjectId]
+    [updateMeta, handleStreamStart, handleStreamChunk, handleStreamDone, handleSectionStart, handleSectionDone, handleReviewResult, handleSectionRegenerationStart, handleSectionRegenerationDone, handleDocumentAnalysis, handleCompetitiveIntel, activeProjectId]
   );
 
-  // Chat state
+  // V2 Chat state
   const {
     messages,
-    guidedStep,
     phase,
     isTyping,
     isGenerating,
-    gatheredAnswers,
-    uploadedFileText,
+    brief,
+    isBriefLoading,
+    narrations,
     uploadedDocuments,
     removeUploadedDocument,
-    outlineSections,
-    isOutlineLoading,
-    startFlow,
+    startPlanning,
     sendMessage,
-    skipCurrentStep,
-    skipToGenerate,
-    handleScopeUpload,
-    skipScopeUpload,
-    triggerGenerate,
-    toggleOutlineSection,
-    approveOutline,
-    regenerateOutline,
-    retryLast,
-    restoreChat,
+    handleUpload,
+    generateBrief,
+    updateBrief,
+    toggleBriefSection,
+    approveAndGenerate,
+    backToPlanning,
     resetChat,
-    // Section regeneration & quality fix
+    restoreChat,
+    // Section operations
     regenerateSection,
     copilotEdit,
     fixIssue,
@@ -155,100 +133,55 @@ function App() {
     availableModels,
     selectedModel,
     setSelectedModel,
-  } = useChat(chatOptions);
+  } = useChatV2(chatOptions);
 
-  // Keep ref in sync with uploadedDocuments to avoid infinite re-render loops in save callbacks
-  useEffect(() => {
-    uploadedDocumentsRef.current = uploadedDocuments;
-  }, [uploadedDocuments]);
-
-  // Restore active project on initial mount
-  const initialLoadRef = useRef(false);
-  useEffect(() => {
-    if (initialLoadRef.current || !activeProjectId || showOnboarding) return;
-    initialLoadRef.current = true;
-
-    const draft = loadProject(activeProjectId);
-    if (
-      draft &&
-      (draft.chatState?.messages?.length > 0 ||
-        draft.documentState?.sections?.some((s) => s.content.trim()))
-    ) {
-      if (draft.chatState) restoreChat(draft.chatState);
-      if (draft.documentState) restoreDocument(draft.documentState);
-      flowStartedRef.current = true;
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeProjectId, showOnboarding]);
-
-  // Auto-start the flow on mount (after onboarding and initial load)
-  useEffect(() => {
-    if (!flowStartedRef.current && !showOnboarding) {
-      flowStartedRef.current = true;
-      startFlow();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showOnboarding, startFlow, resetCounter]);
-
-  // Sync project metadata on state changes
+  // Sync project metadata
   useEffect(() => {
     if (activeProjectId && phase) {
-      syncProjectMeta(phase, documentState.meta);
+      // Map V2Phase to something the project meta can understand
+      const phaseMapping: Record<V2Phase, string> = {
+        landing: 'questions',
+        planning: 'questions',
+        brief: 'outline_review',
+        generating: 'generating',
+        done: 'done',
+      };
+      syncProjectMeta(phaseMapping[phase] as any, documentState.meta);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeProjectId, phase, documentState.meta.projectTitle, documentState.meta.type]);
 
-  const handleOnboardingComplete = useCallback(() => {
-    localStorage.setItem('rfp_onboarded', 'true');
-    setShowOnboarding(false);
-  }, []);
-
   const handleNewProject = useCallback(() => {
-    // Save current project
-    if (activeProjectId) {
-      saveProject(activeProjectId, {
-        chatState: { messages, guidedStep, phase, gatheredAnswers, uploadedFileText, uploadedDocuments: uploadedDocumentsRef.current, outlineSections },
-        documentState,
-        savedAt: Date.now(),
-      });
-    }
     createProject();
     resetChat();
     resetDocument();
-    flowStartedRef.current = false;
-    setResetCounter((c) => c + 1);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeProjectId, messages, guidedStep, phase, gatheredAnswers, uploadedFileText, outlineSections, documentState, saveProject, createProject, resetChat, resetDocument]);
+  }, [createProject, resetChat, resetDocument]);
 
   const handleSelectProject = useCallback(
     (targetId: string) => {
       if (targetId === activeProjectId) return;
 
       const currentDraft = {
-        chatState: { messages, guidedStep, phase, gatheredAnswers, uploadedFileText, uploadedDocuments: uploadedDocumentsRef.current, outlineSections },
+        chatState: { messages, phase, brief, uploadedDocuments },
         documentState,
         savedAt: Date.now(),
       };
 
-      const targetDraft = switchProject(targetId, currentDraft);
+      const targetDraft = switchProject(targetId, currentDraft as any);
 
       if (
         targetDraft &&
         (targetDraft.chatState?.messages?.length > 0 ||
-          targetDraft.documentState?.sections?.some((s) => s.content.trim()))
+          targetDraft.documentState?.sections?.some((s: any) => s.content.trim()))
       ) {
-        restoreChat(targetDraft.chatState);
+        restoreChat(targetDraft.chatState as any);
         restoreDocument(targetDraft.documentState);
-        flowStartedRef.current = true;
       } else {
         resetChat();
         resetDocument();
-        flowStartedRef.current = false;
-        setResetCounter((c) => c + 1);
       }
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [activeProjectId, messages, guidedStep, phase, gatheredAnswers, uploadedFileText, outlineSections, documentState, switchProject, restoreChat, restoreDocument, resetChat, resetDocument]
+    [activeProjectId, messages, phase, brief, uploadedDocuments, documentState, switchProject, restoreChat, restoreDocument, resetChat, resetDocument]
   );
 
   const handleDeleteProject = useCallback(
@@ -259,30 +192,12 @@ function App() {
       deleteProject(projectId);
 
       if (wasActive) {
-        // deleteProject already updates activeProjectId in the index.
-        // We need to load that new active project or start fresh.
-        // The projects state will update on next render, so we reset and let the effect handle it.
         resetChat();
         resetDocument();
-        flowStartedRef.current = false;
-        setResetCounter((c) => c + 1);
       }
     },
     [activeProjectId, deleteProject, resetChat, resetDocument]
   );
-
-  const handleSuggestionsReceived = useCallback(
-    (suggestions: SectionSuggestion[]) => {
-      suggestions.forEach((s) => {
-        addSection(s.title, s.content);
-      });
-    },
-    [addSection]
-  );
-
-  const handleUploadError = useCallback((msg: string) => {
-    alert(msg);
-  }, []);
 
   const handleExportComplete = useCallback(() => {
     setShowFeedback(true);
@@ -295,19 +210,69 @@ function App() {
     isStreaming ||
     documentState.sections.some((s) => s.content.trim());
 
+  // Determine what to show in the left panel
+  const renderLeftPanel = () => {
+    switch (phase) {
+      case 'landing':
+        return (
+          <LandingPage
+            onStartRFP={() => startPlanning('RFP')}
+            onStartRFI={() => startPlanning('RFI')}
+            onStartFreeform={() => startPlanning()}
+          />
+        );
+      case 'planning':
+        return (
+          <PlanningChat
+            messages={messages}
+            isTyping={isTyping}
+            uploadedDocuments={uploadedDocuments}
+            onSendMessage={sendMessage}
+            onUpload={handleUpload}
+            onRemoveDocument={removeUploadedDocument}
+            onGenerateBrief={generateBrief}
+            isBriefLoading={isBriefLoading}
+          />
+        );
+      case 'brief':
+        return brief ? (
+          <BriefReview
+            brief={brief}
+            onToggleSection={toggleBriefSection}
+            onUpdateBrief={updateBrief}
+            onApproveAndGenerate={approveAndGenerate}
+            onBackToPlanning={backToPlanning}
+            isGenerating={isGenerating}
+          />
+        ) : null;
+      case 'generating':
+        return (
+          <GenerationNarrator
+            narrations={narrations}
+            currentSection={currentSection}
+            completedSections={completedSections}
+            totalSections={totalSections}
+            isGenerating={isGenerating}
+          />
+        );
+      case 'done':
+        // After generation, show a completion message in the narrator
+        return (
+          <GenerationNarrator
+            narrations={narrations}
+            currentSection={null}
+            completedSections={completedSections}
+            totalSections={totalSections}
+            isGenerating={false}
+          />
+        );
+      default:
+        return null;
+    }
+  };
+
   return (
     <div className="h-screen flex flex-col bg-gray-50">
-      {/* Onboarding */}
-      {showOnboarding && <Onboarding onComplete={handleOnboardingComplete} />}
-
-      {/* File Uploader Modal */}
-      <FileUploader
-        isOpen={showUploader}
-        onClose={() => setShowUploader(false)}
-        onSuggestionsReceived={handleSuggestionsReceived}
-        onError={handleUploadError}
-      />
-
       {/* Feedback Toast */}
       <FeedbackToast
         isVisible={showFeedback}
@@ -339,40 +304,18 @@ function App() {
           onDeleteProject={handleDeleteProject}
         />
 
-        {/* Chat Panel */}
+        {/* Left Panel: Landing / Planning Chat / Brief Review / Generation Narrator */}
         <div
           className={`flex flex-col transition-all duration-500 ease-in-out ${
             showDocumentPanel
               ? 'w-2/5 min-w-[320px] border-r border-gray-200'
-              : 'w-full max-w-2xl mx-auto'
+              : 'w-full'
           }`}
         >
-          <Chat
-            messages={messages}
-            isTyping={isTyping}
-            isGenerating={isGenerating}
-            phase={phase}
-            guidedStep={guidedStep}
-            outlineSections={outlineSections}
-            isOutlineLoading={isOutlineLoading}
-            currentSection={currentSection}
-            onSendMessage={sendMessage}
-            onRetry={retryLast}
-            onFileUpload={() => setShowUploader(true)}
-            onSkipStep={skipCurrentStep}
-            onSkipToGenerate={skipToGenerate}
-            onScopeUpload={handleScopeUpload}
-            onSkipScopeUpload={skipScopeUpload}
-            uploadedDocuments={uploadedDocuments}
-            onRemoveDocument={removeUploadedDocument}
-            onTriggerGenerate={triggerGenerate}
-            onToggleOutlineSection={toggleOutlineSection}
-            onApproveOutline={approveOutline}
-            onRegenerateOutline={regenerateOutline}
-          />
+          {renderLeftPanel()}
         </div>
 
-        {/* Document Panel — slides in from right when document is ready */}
+        {/* Document Panel — slides in when document is ready */}
         {showDocumentPanel && (
           <div className="flex-1 flex flex-col doc-panel-enter">
             <DocumentPreview

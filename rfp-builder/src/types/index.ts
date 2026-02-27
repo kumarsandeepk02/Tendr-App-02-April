@@ -246,3 +246,37 @@ export interface ModelOption {
 // ===================== Onboarding =====================
 
 export type OnboardingStep = 1 | 2 | 3;
+
+// ===================== V2 Types =====================
+
+export type V2Phase = 'landing' | 'planning' | 'brief' | 'generating' | 'done';
+
+export interface BriefData {
+  docType: DocumentType;
+  projectTitle: string;
+  projectDescription: string;
+  industry: string;
+  requirements: string[];
+  evaluationCriteria: string[];
+  timeline: string;
+  additionalContext: string;
+  suggestedSections: BriefSection[];
+  confidence: {
+    overall: number;
+    missingInfo: string[];
+  };
+}
+
+export interface BriefSection {
+  title: string;
+  description: string;
+  priority: 'high' | 'medium' | 'low';
+  included?: boolean;
+}
+
+export interface NarrationMessage {
+  id: string;
+  content: string;
+  timestamp: number;
+  type: 'thinking' | 'progress' | 'done';
+}

@@ -5,6 +5,7 @@ const { runPipeline } = require('../services/agentPipeline');
 const { regenerateSection } = require('../services/agents/sectionWriter');
 const { analyzeDocuments } = require('../services/agents/documentAnalyzer');
 const { generateCompetitiveIntel } = require('../services/agents/competitiveIntelAgent');
+const { planningChat, generateBrief } = require('../services/agents/planningAgent');
 
 // GET available models
 router.get('/models', (req, res) => {
@@ -245,6 +246,148 @@ router.post('/competitive-intel', async (req, res) => {
   } catch (error) {
     console.error('Competitive intel error:', error.message);
     res.status(500).json({ error: 'Competitive intelligence generation failed.' });
+  }
+});
+
+// ===================== V2 Endpoints =====================
+
+// V2: Planning Agent chat — freeform conversation to gather project context
+router.post('/v2/planning', async (req, res) => {
+  try {
+    const { messages, fileContext, model } = req.body;
+
+    if (!messages || !Array.isArray(messages) || messages.length === 0) {
+      return res.status(400).json({ error: 'Messages array is required' });
+    }
+
+    const content = await planningChat({ messages, fileContext, model });
+    res.json({ content });
+  } catch (error) {
+    console.error('V2 Planning chat error:', error.message);
+    res.status(500).json({
+      error: 'Failed to generate response. Please try again.',
+    });
+  }
+});
+
+// V2: Generate structured brief from planning conversation
+router.post('/v2/brief', async (req, res) => {
+  try {
+    const { messages, fileContext, model } = req.body;
+
+    if (!messages || !Array.isArray(messages) || messages.length === 0) {
+      return res.status(400).json({ error: 'Messages array is required' });
+    }
+
+    const brief = await generateBrief({ messages, fileContext, model });
+    res.json(brief);
+  } catch (error) {
+    console.error('V2 Brief generation error:', error.message);
+    res.status(500).json({
+      error: 'Failed to generate brief. Please try again.',
+    });
+  }
+});
+
+// V2: Pipeline with narration events (uses existing pipeline but adds narration SSE events)
+router.post('/v2/pipeline', async (req, res) => {
+  try {
+    const { brief, fileContext, confirmedSections, uploadedDocuments, model } = req.body;
+
+    if (!brief) {
+      return res.status(400).json({ error: 'brief is required' });
+    }
+
+    // Convert brief to answers format for pipeline compatibility
+    const answers = {
+      doc_type: brief.docType || 'RFP',
+      project_title: brief.projectTitle || '',
+      project_description: brief.projectDescription || '',
+      requirements: Array.isArray(brief.requirements) ? brief.requirements.join('\n') : '',
+      evaluation_criteria: Array.isArray(brief.evaluationCriteria) ? brief.evaluationCriteria.join('\n') : '',
+      deadline: brief.timeline || '',
+      additional_sections: brief.additionalContext || '',
+    };
+
+    const docType = brief.docType || 'RFP';
+
+    // Set SSE headers
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
+
+    // Track async results
+    let asyncPending = 2;
+    if (uploadedDocuments && uploadedDocuments.length > 0) asyncPending++;
+
+    const tryClose = () => {
+      asyncPending--;
+      if (asyncPending <= 0 && !res.writableEnded) {
+        res.end();
+      }
+    };
+
+    await runPipeline(
+      { answers, fileContext, docType, confirmedSections, uploadedDocuments, model },
+      {
+        onSectionStart: (title, index, total) => {
+          // V2: Send narration event before section_start
+          res.write(`data: ${JSON.stringify({ type: 'narration', content: `Starting section ${index + 1} of ${total}: **${title}**` })}\n\n`);
+          res.write(`data: ${JSON.stringify({ type: 'section_start', title, index, total })}\n\n`);
+        },
+        onText: (chunk) => {
+          res.write(`data: ${JSON.stringify({ type: 'text', content: chunk })}\n\n`);
+        },
+        onSectionDone: (title, content) => {
+          res.write(`data: ${JSON.stringify({ type: 'section_done', title, content })}\n\n`);
+          res.write(`data: ${JSON.stringify({ type: 'narration', content: `✓ Completed **${title}**` })}\n\n`);
+        },
+        onDone: (fullDocument) => {
+          res.write(`data: ${JSON.stringify({ type: 'narration', content: '📋 All sections complete. Running quality review...' })}\n\n`);
+          res.write(`data: ${JSON.stringify({ type: 'done', content: fullDocument })}\n\n`);
+        },
+        onReview: (reviewResult) => {
+          if (reviewResult && !res.writableEnded) {
+            res.write(`data: ${JSON.stringify({ type: 'narration', content: `✅ Quality review complete — score: ${reviewResult.score}/100` })}\n\n`);
+            res.write(`data: ${JSON.stringify({ type: 'review', content: reviewResult })}\n\n`);
+          }
+          tryClose();
+        },
+        onCompetitiveIntel: (intelResult) => {
+          if (intelResult && !res.writableEnded) {
+            res.write(`data: ${JSON.stringify({ type: 'narration', content: '🔍 Competitive intelligence analysis complete' })}\n\n`);
+            res.write(`data: ${JSON.stringify({ type: 'competitive_intel', content: intelResult })}\n\n`);
+          }
+          tryClose();
+        },
+        onDocumentAnalysis: (analysisResult) => {
+          if (analysisResult && !res.writableEnded) {
+            res.write(`data: ${JSON.stringify({ type: 'document_analysis', content: analysisResult })}\n\n`);
+          }
+          tryClose();
+        },
+        onError: (errorMessage) => {
+          res.write(`data: ${JSON.stringify({ type: 'error', content: errorMessage })}\n\n`);
+          res.end();
+        },
+      }
+    );
+
+    setTimeout(() => {
+      if (!res.writableEnded) {
+        res.end();
+      }
+    }, 60000);
+  } catch (error) {
+    console.error('V2 Pipeline API error:', error.message);
+    if (res.headersSent) {
+      res.write(`data: ${JSON.stringify({ type: 'error', content: 'Pipeline failed. Please try again.' })}\n\n`);
+      res.end();
+    } else {
+      res.status(500).json({ error: 'Failed to run pipeline. Please try again.' });
+    }
   }
 });
 
