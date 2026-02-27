@@ -372,6 +372,9 @@ export function useChat(options?: UseChatOptions) {
     }, 300);
   }, [addMessage]);
 
+  // Track which async pipeline results were received via SSE
+  const pipelineResultsRef = useRef({ competitiveIntel: false, documentAnalysis: false });
+
   // Helper: read SSE stream and dispatch events to callbacks
   const readSSEStream = useCallback(async (response: Response, usePipeline: boolean) => {
     const reader = response.body?.getReader();
@@ -379,6 +382,11 @@ export function useChat(options?: UseChatOptions) {
 
     const decoder = new TextDecoder();
     let buffer = '';
+
+    // Reset tracking for this stream
+    if (usePipeline) {
+      pipelineResultsRef.current = { competitiveIntel: false, documentAnalysis: false };
+    }
 
     while (true) {
       const { done, value } = await reader.read();
@@ -405,8 +413,10 @@ export function useChat(options?: UseChatOptions) {
             } else if (usePipeline && parsed.type === 'review') {
               optionsRef.current?.onReviewResult?.(parsed.content);
             } else if (usePipeline && parsed.type === 'document_analysis') {
+              pipelineResultsRef.current.documentAnalysis = true;
               optionsRef.current?.onDocumentAnalysis?.(parsed.content);
             } else if (usePipeline && parsed.type === 'competitive_intel') {
+              pipelineResultsRef.current.competitiveIntel = true;
               optionsRef.current?.onCompetitiveIntel?.(parsed.content);
             }
           } catch (parseErr: any) {
@@ -480,6 +490,30 @@ export function useChat(options?: UseChatOptions) {
       }
 
       await readSSEStream(response, true);
+
+      // Backup fetch: if competitive intel was not received via SSE (proxy buffering
+      // can drop late events), fetch it via a dedicated API call.
+      if (!pipelineResultsRef.current.competitiveIntel) {
+        try {
+          const intelRes = await fetch(`${API_URL}/api/chat/competitive-intel`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ docType, answers: gatheredAnswers }),
+          });
+          if (intelRes.ok) {
+            const intel = await intelRes.json();
+            if (intel && (intel.industryBenchmarks?.length > 0 || intel.marketStandards?.length > 0 || intel.riskFactors?.length > 0)) {
+              optionsRef.current?.onCompetitiveIntel?.(intel);
+            }
+          }
+        } catch (intelErr) {
+          console.warn('Backup competitive intel fetch failed:', intelErr);
+        }
+      }
+
+      // Note: Document analysis backup fetch is skipped here because it requires
+      // generatedSections which aren't available in this scope. The SSE delivery
+      // for document_analysis is more reliable since it arrives with the stream.
     },
     [gatheredAnswers, uploadedDocuments, readSSEStream]
   );
