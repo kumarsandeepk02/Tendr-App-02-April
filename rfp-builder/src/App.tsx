@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
-import { V2Phase } from './types';
+import { V2Phase, BriefSection } from './types';
 import { useChatV2 } from './hooks/useChatV2';
 import { useDocument } from './hooks/useDocument';
 import { useProjects } from './hooks/useProjects';
@@ -11,11 +11,15 @@ import LandingPage from './components/v2/LandingPage';
 import PlanningChat from './components/v2/PlanningChat';
 import BriefReview from './components/v2/BriefReview';
 import GenerationNarrator from './components/v2/GenerationNarrator';
+import PersistentChat from './components/PersistentChat';
 import './index.css';
 
 function App() {
   // Feedback
   const [showFeedback, setShowFeedback] = useState(false);
+
+  // Full-page edit mode (hides left panel, expands document to full width)
+  const [isFullPageEdit, setIsFullPageEdit] = useState(false);
 
   // Sidebar collapse state
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
@@ -64,6 +68,8 @@ function App() {
     handleReviewResult,
     handleDocumentAnalysis,
     handleCompetitiveIntel,
+    generationStage,
+    handleStageChange,
     // Section regeneration
     regeneratingSectionId,
     previousSectionContent,
@@ -95,9 +101,10 @@ function App() {
       onSectionRegenerationDone: handleSectionRegenerationDone,
       onDocumentAnalysis: handleDocumentAnalysis,
       onCompetitiveIntel: handleCompetitiveIntel,
+      onStageChange: handleStageChange,
       projectId: activeProjectId,
     }),
-    [updateMeta, handleStreamStart, handleStreamChunk, handleStreamDone, handleSectionStart, handleSectionDone, handleReviewResult, handleSectionRegenerationStart, handleSectionRegenerationDone, handleDocumentAnalysis, handleCompetitiveIntel, activeProjectId]
+    [updateMeta, handleStreamStart, handleStreamChunk, handleStreamDone, handleSectionStart, handleSectionDone, handleReviewResult, handleSectionRegenerationStart, handleSectionRegenerationDone, handleDocumentAnalysis, handleCompetitiveIntel, handleStageChange, activeProjectId]
   );
 
   // V2 Chat state
@@ -116,11 +123,14 @@ function App() {
     handleUpload,
     generateBrief,
     updateBrief,
+    updateBriefSection,
     toggleBriefSection,
     approveAndGenerate,
     backToPlanning,
     resetChat,
     restoreChat,
+    // Freeform / persistent chat
+    sendFreeformMessage,
     // Section operations
     regenerateSection,
     copilotEdit,
@@ -148,10 +158,21 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeProjectId, phase, documentState.meta.projectTitle, documentState.meta.type]);
 
+  // Auto-expand to full-page edit when generation completes
+  useEffect(() => {
+    if (phase === 'done' && !isGenerating && !isStreaming) {
+      setIsFullPageEdit(true);
+    }
+    if (phase !== 'done' && phase !== 'generating') {
+      setIsFullPageEdit(false);
+    }
+  }, [phase, isGenerating, isStreaming]);
+
   const handleNewProject = useCallback(() => {
     createProject();
     resetChat();
     resetDocument();
+    setIsFullPageEdit(false);
   }, [createProject, resetChat, resetDocument]);
 
   const handleSelectProject = useCallback(
@@ -236,6 +257,7 @@ function App() {
           <BriefReview
             brief={brief}
             onToggleSection={toggleBriefSection}
+            onUpdateSection={updateBriefSection}
             onUpdateBrief={updateBrief}
             onApproveAndGenerate={approveAndGenerate}
             onBackToPlanning={backToPlanning}
@@ -302,19 +324,21 @@ function App() {
         />
 
         {/* Left Panel: Landing / Planning Chat / Brief Review / Generation Narrator */}
-        <div
-          className={`flex flex-col transition-all duration-500 ease-in-out ${
-            showDocumentPanel
-              ? 'w-2/5 min-w-[320px] border-r border-gray-200'
-              : 'w-full'
-          }`}
-        >
-          {renderLeftPanel()}
-        </div>
+        {!isFullPageEdit && (
+          <div
+            className={`flex flex-col transition-all duration-500 ease-in-out ${
+              showDocumentPanel
+                ? 'w-2/5 min-w-[320px] border-r border-gray-200'
+                : 'w-full'
+            }`}
+          >
+            {renderLeftPanel()}
+          </div>
+        )}
 
-        {/* Document Panel — slides in when document is ready */}
+        {/* Document Panel — full-width in edit mode, slides in during generation */}
         {showDocumentPanel && (
-          <div className="flex-1 flex flex-col doc-panel-enter">
+          <div className={`flex flex-col doc-panel-enter ${isFullPageEdit ? 'w-full' : 'flex-1'}`}>
             <DocumentPreview
               documentState={documentState}
               completedSections={completedSections}
@@ -323,6 +347,9 @@ function App() {
               showPlaceholder={showPlaceholder}
               currentSection={currentSection}
               qualityReview={qualityReview}
+              generationStage={generationStage}
+              isFullPageEdit={isFullPageEdit}
+              onToggleChatPanel={() => setIsFullPageEdit((prev) => !prev)}
               onUpdateSection={updateSection}
               onRemoveSection={removeSection}
               onAddSection={addSection}
@@ -350,6 +377,14 @@ function App() {
           </div>
         )}
       </div>
+
+      {/* Persistent floating chat — available during generation & done phases */}
+      <PersistentChat
+        phase={phase === 'landing' ? 'questions' : phase === 'planning' ? 'questions' : phase === 'brief' ? 'outline_review' : phase}
+        isGenerating={isGenerating}
+        onSendMessage={sendFreeformMessage}
+        sectionTitles={documentState.sections.map((s) => s.title)}
+      />
     </div>
   );
 }

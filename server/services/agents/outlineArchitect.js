@@ -72,7 +72,8 @@ const DEFAULT_OUTLINE = [
 
 /**
  * Generate a structured outline for the document.
- * If confirmedSections are provided, uses those titles and adds metadata.
+ * If confirmedSections are provided, uses those (title + description) and adds metadata.
+ * confirmedSections can be an array of strings (legacy) or objects {title, description}.
  * Otherwise, asks Claude for a tailored outline.
  */
 async function generateOutline({ answers, fileContext, docType, confirmedSections, model }) {
@@ -81,13 +82,18 @@ async function generateOutline({ answers, fileContext, docType, confirmedSection
   // If user already confirmed sections from the client-side outline, enrich with metadata
   if (confirmedSections && confirmedSections.length > 0) {
     return {
-      outline: confirmedSections.map((title, i) => ({
-        title,
-        description: '',
-        contextKeys: inferContextKeys(title, answers),
-        estimatedLength: inferLength(title),
-        dependencies: [],
-      })),
+      outline: confirmedSections.map((section, i) => {
+        // Support both string[] (legacy) and {title, description}[] formats
+        const title = typeof section === 'string' ? section : section.title;
+        const description = typeof section === 'string' ? '' : (section.description || '');
+        return {
+          title,
+          description,
+          contextKeys: inferContextKeys(title, answers),
+          estimatedLength: inferLength(title),
+          dependencies: [],
+        };
+      }),
       industry,
     };
   }

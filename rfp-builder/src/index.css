@@ -132,3 +132,12 @@ code {
 .master-editor-enter {
   animation: masterEditorEnter 0.3s ease-out both;
 }
+
+/* Stage progress pulse */
+@keyframes stagePulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(79, 70, 229, 0.3); }
+  50% { box-shadow: 0 0 0 6px rgba(79, 70, 229, 0); }
+}
+.stage-pulse {
+  animation: stagePulse 2s ease-in-out infinite;
+}

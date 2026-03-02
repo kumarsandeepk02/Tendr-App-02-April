@@ -19,19 +19,20 @@ const MAX_TOTAL_CHARS = 100000; // ~25k tokens
  * @param {Object} config.answers Gathered answers from the user
  * @param {string} [config.fileContext] Uploaded document text
  * @param {string} config.docType 'RFI' or 'RFP'
- * @param {string[]} [config.confirmedSections] User-confirmed section titles
+ * @param {Array<{title: string, description: string}|string>} [config.confirmedSections] User-confirmed sections (title + description) or legacy string titles
  * @param {Array} [config.uploadedDocuments] Array of {name, text} for multi-doc analysis
  * @param {Object} callbacks Event callbacks
  */
 async function runPipeline(config, callbacks) {
   const { answers, fileContext, docType, confirmedSections, uploadedDocuments, model } = config;
-  const { onSectionStart, onText, onSectionDone, onDone, onReview, onDocumentAnalysis, onCompetitiveIntel, onError } = callbacks;
+  const { onSectionStart, onText, onSectionDone, onDone, onReview, onDocumentAnalysis, onCompetitiveIntel, onError, onStage } = callbacks;
 
   let fullDocument = '';
   let totalChars = 0;
 
   try {
     // Phase 1: Outline Architect
+    if (onStage) onStage('brainstorming');
     const { outline, industry } = await generateOutline({
       answers,
       fileContext,
@@ -40,10 +41,12 @@ async function runPipeline(config, callbacks) {
       model,
     });
 
+    if (onStage) onStage('planning');
     const total = outline.length;
     const completedSections = [];
 
     // Phase 2: Section Writer (per-section)
+    if (onStage) onStage('writing');
     for (let i = 0; i < outline.length; i++) {
       const section = outline[i];
 
@@ -106,6 +109,7 @@ async function runPipeline(config, callbacks) {
 
     // Emit done with the full document
     if (onDone) onDone(fullDocument.trim());
+    if (onStage) onStage('checking');
 
     // Phase 3: Quality Reviewer (async — fire and forget)
     // NOTE: Always call the callback (with null on failure) so the route handler

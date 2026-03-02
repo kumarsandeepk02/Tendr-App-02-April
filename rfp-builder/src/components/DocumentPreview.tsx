@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
-import { DocumentState, DocumentSection, QualityReview, SectionProgress, ReviewIssue, DocumentAnalysis, CompetitiveIntelligence } from '../types';
+import { DocumentState, DocumentSection, QualityReview, SectionProgress, ReviewIssue, DocumentAnalysis, CompetitiveIntelligence, GenerationStage } from '../types';
 import SectionCard from './SectionCard';
 import ProgressBar from './ProgressBar';
 import DocumentAnalysisPanel from './DocumentAnalysisPanel';
 import CompetitiveIntelPanel from './CompetitiveIntelPanel';
-import { Plus, FileText, Loader2, PenLine, ChevronDown, ChevronUp, X, AlertTriangle, AlertCircle, Info, Wrench, CheckCircle2 } from 'lucide-react';
+import { Plus, FileText, Loader2, PenLine, ChevronDown, ChevronUp, X, AlertTriangle, AlertCircle, Info, Wrench, CheckCircle2, MessageSquare, Maximize2 } from 'lucide-react';
 import MasterEditor from './MasterEditor';
 
 interface DocumentPreviewProps {
@@ -15,6 +15,9 @@ interface DocumentPreviewProps {
   showPlaceholder: boolean;
   currentSection: SectionProgress | null;
   qualityReview: QualityReview | null;
+  generationStage?: GenerationStage | null;
+  isFullPageEdit?: boolean;
+  onToggleChatPanel?: () => void;
   onUpdateSection: (id: string, updates: Partial<DocumentSection>) => void;
   onRemoveSection: (id: string) => void;
   onAddSection: (title: string, content?: string) => void;
@@ -303,6 +306,9 @@ const DocumentPreview: React.FC<DocumentPreviewProps> = ({
   showPlaceholder,
   currentSection,
   qualityReview,
+  generationStage,
+  isFullPageEdit,
+  onToggleChatPanel,
   onUpdateSection,
   onRemoveSection,
   onAddSection,
@@ -377,16 +383,37 @@ const DocumentPreview: React.FC<DocumentPreviewProps> = ({
               </span>
             )}
           </div>
-          {hasAnySections && !isStreaming && !showPlaceholder && (
-            <button
-              onClick={() => setShowMasterEditor(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors"
-              title="Edit all sections at once"
-            >
-              <PenLine size={14} />
-              Edit All
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            {onToggleChatPanel && (
+              <button
+                onClick={onToggleChatPanel}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+                title={isFullPageEdit ? 'Show chat panel' : 'Expand to full page'}
+              >
+                {isFullPageEdit ? (
+                  <>
+                    <MessageSquare size={14} />
+                    Show Chat
+                  </>
+                ) : (
+                  <>
+                    <Maximize2 size={14} />
+                    Full Page
+                  </>
+                )}
+              </button>
+            )}
+            {hasAnySections && !isStreaming && !showPlaceholder && (
+              <button
+                onClick={() => setShowMasterEditor(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors"
+                title="Edit all sections at once"
+              >
+                <PenLine size={14} />
+                Edit All
+              </button>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-3 text-xs text-gray-500">
           <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 font-medium">
@@ -407,6 +434,7 @@ const DocumentPreview: React.FC<DocumentPreviewProps> = ({
           completed={completedSections}
           total={totalSections}
           isPulsing={isStreaming}
+          stage={generationStage}
         />
       )}
 

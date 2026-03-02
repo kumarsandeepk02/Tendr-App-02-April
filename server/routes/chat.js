@@ -110,6 +110,9 @@ router.post('/pipeline', async (req, res) => {
     await runPipeline(
       { answers, fileContext, docType, confirmedSections, uploadedDocuments, model },
       {
+        onStage: (stage) => {
+          res.write(`data: ${JSON.stringify({ type: 'stage', stage })}\n\n`);
+        },
         onSectionStart: (title, index, total) => {
           res.write(`data: ${JSON.stringify({ type: 'section_start', title, index, total })}\n\n`);
         },
@@ -341,6 +344,9 @@ router.post('/v2/pipeline', async (req, res) => {
     await runPipeline(
       { answers, fileContext, docType, confirmedSections, uploadedDocuments, model },
       {
+        onStage: (stage) => {
+          res.write(`data: ${JSON.stringify({ type: 'stage', stage })}\n\n`);
+        },
         onSectionStart: (title, index, total) => {
           // Use contextual narration if available, fall back to generic
           const narration = contextualNarrations[title]
@@ -363,6 +369,7 @@ router.post('/v2/pipeline', async (req, res) => {
           if (reviewResult && !res.writableEnded) {
             res.write(`data: ${JSON.stringify({ type: 'narration', content: `✅ Quality review complete — score: ${reviewResult.score}/100`, agent: 'reviewer' })}\n\n`);
             res.write(`data: ${JSON.stringify({ type: 'review', content: reviewResult })}\n\n`);
+            res.write(`data: ${JSON.stringify({ type: 'stage', stage: 'complete' })}\n\n`);
           }
           tryClose();
         },

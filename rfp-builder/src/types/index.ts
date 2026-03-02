@@ -135,7 +135,9 @@ export interface ProjectIndex {
 
 // ===================== Pipeline Types =====================
 
-export type PipelineEventType = 'section_start' | 'text' | 'section_done' | 'done' | 'review' | 'error';
+export type GenerationStage = 'brainstorming' | 'planning' | 'writing' | 'checking' | 'complete';
+
+export type PipelineEventType = 'section_start' | 'text' | 'section_done' | 'done' | 'review' | 'error' | 'stage';
 
 export interface PipelineEvent {
   type: PipelineEventType;

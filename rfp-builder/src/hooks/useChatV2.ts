@@ -12,6 +12,7 @@ import {
   DocumentAnalysis,
   CompetitiveIntelligence,
   ModelOption,
+  GenerationStage,
 } from '../types';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
@@ -32,6 +33,7 @@ interface UseChatV2Options {
   onSectionRegenerationStart?: (sectionId: string) => void;
   onSectionRegenerationDone?: (sectionId: string, content: string) => void;
   onMetaUpdate?: (updates: Record<string, string>) => void;
+  onStageChange?: (stage: GenerationStage) => void;
   projectId?: string | null;
 }
 
@@ -258,6 +260,16 @@ export function useChatV2(options?: UseChatV2Options) {
     setBrief((prev) => (prev ? { ...prev, ...updates } : prev));
   }, []);
 
+  // Update a section's title/description in the brief
+  const updateBriefSection = useCallback((index: number, updates: Partial<{ title: string; description: string; priority: string }>) => {
+    setBrief((prev) => {
+      if (!prev) return prev;
+      const sections = [...prev.suggestedSections];
+      sections[index] = { ...sections[index], ...updates } as any;
+      return { ...prev, suggestedSections: sections };
+    });
+  }, []);
+
   // Toggle a section in the brief
   const toggleBriefSection = useCallback((index: number) => {
     setBrief((prev) => {
@@ -308,6 +320,8 @@ export function useChatV2(options?: UseChatV2Options) {
             } else if (parsed.type === 'competitive_intel') {
               pipelineResultsRef.current.competitiveIntel = true;
               optionsRef.current?.onCompetitiveIntel?.(parsed.content);
+            } else if (parsed.type === 'stage') {
+              optionsRef.current?.onStageChange?.(parsed.stage);
             } else if (parsed.type === 'narration') {
               // V2-specific: narration events for "thinking out loud"
               const narrationStyle = parsed.narrationStyle === 'handover' ? 'handover' : 'progress';
@@ -339,7 +353,7 @@ export function useChatV2(options?: UseChatV2Options) {
 
     const confirmedSections = brief.suggestedSections
       .filter((s) => s.included !== false)
-      .map((s) => s.title);
+      .map((s) => ({ title: s.title, description: s.description }));
 
     // Build planning messages for contextual narration generation
     const planningMessages = messages
@@ -575,6 +589,28 @@ export function useChatV2(options?: UseChatV2Options) {
     [fixIssue]
   );
 
+  // --- Freeform / Persistent Chat ---
+  const sendFreeformMessage = useCallback(
+    async (content: string): Promise<string> => {
+      const docType = brief?.docType || 'RFP';
+      const projectTitle = brief?.projectTitle || 'Untitled';
+      const systemPrompt = `You are Priya, an expert procurement document assistant. The user is working on a ${docType} document titled "${projectTitle}". Help them with any questions or editing instructions. Be concise and helpful.`;
+
+      try {
+        const res = await axios.post(`${API_URL}/api/chat`, {
+          messages: [{ role: 'user', content }],
+          systemPrompt,
+          model: selectedModel || undefined,
+        });
+        return res.data.content || 'Sorry, I could not generate a response.';
+      } catch (err) {
+        console.error('Freeform message error:', err);
+        return 'Sorry, something went wrong. Please try again.';
+      }
+    },
+    [brief, selectedModel]
+  );
+
   // Reset everything
   const resetChat = useCallback(() => {
     setMessages([]);
@@ -623,11 +659,14 @@ export function useChatV2(options?: UseChatV2Options) {
     removeUploadedDocument,
     generateBrief,
     updateBrief,
+    updateBriefSection,
     toggleBriefSection,
     approveAndGenerate,
     backToPlanning,
     resetChat,
     restoreChat,
+    // Freeform / persistent chat
+    sendFreeformMessage,
     // Section operations (same as V1)
     regenerateSection,
     copilotEdit,

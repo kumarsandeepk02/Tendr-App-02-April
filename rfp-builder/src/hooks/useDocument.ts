@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { DocumentState, DocumentSection, QualityReview, SectionProgress, DocumentAnalysis, CompetitiveIntelligence } from '../types';
+import { DocumentState, DocumentSection, QualityReview, SectionProgress, DocumentAnalysis, CompetitiveIntelligence, GenerationStage } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 
 function createInitialState(): DocumentState {
@@ -27,6 +27,7 @@ export function useDocument(projectId?: string | null) {
   const [qualityReview, setQualityReview] = useState<QualityReview | null>(null);
   const [documentAnalysis, setDocumentAnalysis] = useState<DocumentAnalysis | null>(null);
   const [competitiveIntel, setCompetitiveIntel] = useState<CompetitiveIntelligence | null>(null);
+  const [generationStage, setGenerationStage] = useState<GenerationStage | null>(null);
   const streamBufferRef = useRef('');
 
   // --- Section Regeneration State ---
@@ -172,12 +173,17 @@ export function useDocument(projectId?: string | null) {
   // --- Streaming methods ---
 
   // Called when streaming starts: clear document, show placeholder
+  const handleStageChange = useCallback((stage: GenerationStage) => {
+    setGenerationStage(stage);
+  }, []);
+
   const handleStreamStart = useCallback(() => {
     setIsStreaming(true);
     setShowPlaceholder(true);
     setCurrentSection(null);
     setQualityReview(null);
     setDocumentAnalysis(null);
+    setGenerationStage(null);
     setCompetitiveIntel(null);
     streamBufferRef.current = '';
     // Clear all sections for fresh streamed content
@@ -436,6 +442,7 @@ export function useDocument(projectId?: string | null) {
     setQualityReview(null);
     setDocumentAnalysis(null);
     setCompetitiveIntel(null);
+    setGenerationStage(null);
     setRegeneratingSectionId(null);
     setPreviousSectionContent(null);
     setFixingIssue(null);
@@ -480,6 +487,8 @@ export function useDocument(projectId?: string | null) {
     handleReviewResult,
     handleDocumentAnalysis,
     handleCompetitiveIntel,
+    generationStage,
+    handleStageChange,
     // Section regeneration
     regeneratingSectionId,
     previousSectionContent,

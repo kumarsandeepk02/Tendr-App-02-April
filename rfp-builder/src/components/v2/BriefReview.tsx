@@ -12,11 +12,15 @@ import {
   ChevronDown,
   ChevronUp,
   Zap,
+  PenLine,
+  Check,
+  X,
 } from 'lucide-react';
 
 interface BriefReviewProps {
   brief: BriefData;
   onToggleSection: (index: number) => void;
+  onUpdateSection: (index: number, updates: Partial<BriefSection>) => void;
   onUpdateBrief: (updates: Partial<BriefData>) => void;
   onApproveAndGenerate: () => void;
   onBackToPlanning: () => void;
@@ -26,6 +30,7 @@ interface BriefReviewProps {
 const BriefReview: React.FC<BriefReviewProps> = ({
   brief,
   onToggleSection,
+  onUpdateSection,
   onUpdateBrief,
   onApproveAndGenerate,
   onBackToPlanning,
@@ -209,6 +214,7 @@ const BriefReview: React.FC<BriefReviewProps> = ({
                 section={section}
                 index={index}
                 onToggle={() => onToggleSection(index)}
+                onUpdate={(updates) => onUpdateSection(index, updates)}
               />
             ))}
           </div>
@@ -253,7 +259,12 @@ const SectionRow: React.FC<{
   section: BriefSection;
   index: number;
   onToggle: () => void;
-}> = ({ section, index, onToggle }) => {
+  onUpdate: (updates: Partial<BriefSection>) => void;
+}> = ({ section, index, onToggle, onUpdate }) => {
+  const [isEditing, setIsEditing] = useState(false);
+  const [editTitle, setEditTitle] = useState(section.title);
+  const [editDesc, setEditDesc] = useState(section.description);
+
   const included = section.included !== false;
   const priorityColor: Record<string, string> = {
     high: 'bg-red-50 text-red-600',
@@ -261,22 +272,79 @@ const SectionRow: React.FC<{
     low: 'bg-gray-100 text-gray-500',
   };
 
+  const startEdit = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditTitle(section.title);
+    setEditDesc(section.description);
+    setIsEditing(true);
+  };
+
+  const saveEdit = () => {
+    if (editTitle.trim()) {
+      onUpdate({ title: editTitle.trim(), description: editDesc.trim() });
+    }
+    setIsEditing(false);
+  };
+
+  const cancelEdit = () => {
+    setIsEditing(false);
+  };
+
+  if (isEditing) {
+    return (
+      <div className="w-full px-4 py-3 rounded-xl border border-indigo-200 bg-indigo-50/30">
+        <input
+          type="text"
+          value={editTitle}
+          onChange={(e) => setEditTitle(e.target.value)}
+          className="w-full text-sm font-medium text-gray-900 border border-indigo-300 rounded-lg px-3 py-1.5 mb-2 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+          placeholder="Section title"
+          autoFocus
+          onKeyDown={(e) => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') cancelEdit(); }}
+        />
+        <textarea
+          value={editDesc}
+          onChange={(e) => setEditDesc(e.target.value)}
+          rows={2}
+          className="w-full text-xs text-gray-600 border border-gray-300 rounded-lg px-3 py-1.5 mb-2 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none resize-none"
+          placeholder="Section description"
+          onKeyDown={(e) => { if (e.key === 'Escape') cancelEdit(); }}
+        />
+        <div className="flex items-center gap-2">
+          <button
+            onClick={saveEdit}
+            className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 transition-colors"
+          >
+            <Check size={12} />
+            Save
+          </button>
+          <button
+            onClick={cancelEdit}
+            className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded-md hover:bg-gray-50 transition-colors"
+          >
+            <X size={12} />
+            Cancel
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <button
-      onClick={onToggle}
-      className={`w-full flex items-start gap-3 px-4 py-3 rounded-xl border text-left transition-all ${
+    <div
+      className={`w-full flex items-start gap-3 px-4 py-3 rounded-xl border text-left transition-all group ${
         included
           ? 'border-gray-200 bg-white hover:border-indigo-200'
           : 'border-gray-100 bg-gray-50 opacity-60 hover:opacity-80'
       }`}
     >
-      <div className="mt-0.5 flex-shrink-0">
+      <button onClick={onToggle} className="mt-0.5 flex-shrink-0">
         {included ? (
           <CheckSquare size={18} className="text-indigo-600" />
         ) : (
           <Square size={18} className="text-gray-300" />
         )}
-      </div>
+      </button>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
           <span className={`text-sm font-medium ${included ? 'text-gray-900' : 'text-gray-500 line-through'}`}>
@@ -286,11 +354,18 @@ const SectionRow: React.FC<{
             {section.priority}
           </span>
         </div>
-        <p className={`text-xs mt-0.5 ${included ? 'text-gray-500' : 'text-gray-400'}`}>
+        <p className={`text-xs mt-0.5 leading-relaxed ${included ? 'text-gray-500' : 'text-gray-400'}`}>
           {section.description}
         </p>
       </div>
-    </button>
+      <button
+        onClick={startEdit}
+        className="flex-shrink-0 p-1.5 text-gray-300 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
+        title="Edit section"
+      >
+        <PenLine size={14} />
+      </button>
+    </div>
   );
 };
 
