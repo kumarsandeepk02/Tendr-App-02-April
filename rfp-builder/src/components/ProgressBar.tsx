@@ -30,7 +30,7 @@ const ProgressBar: React.FC<ProgressBarProps> = ({ completed, total, isPulsing =
           {STAGES.map((s, i) => {
             const isCompleted = i < activeIndex;
             const isActive = i === activeIndex;
-            const isPending = i > activeIndex;
+            const _isPending = i > activeIndex;
 
             return (
               <React.Fragment key={s.key}>

@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
-import { V2Phase, BriefSection } from './types';
+import { V2Phase } from './types';
 import { useChatV2 } from './hooks/useChatV2';
 import { useDocument } from './hooks/useDocument';
 import { useProjects } from './hooks/useProjects';
