@@ -68,7 +68,7 @@ OUTPUT FORMAT — Return ONLY valid JSON with this exact structure:
   "suggestedSections": [
     {
       "title": "Section Title",
-      "description": "1-sentence description of what this section covers",
+      "description": "1-sentence description that is SPECIFIC to this project — must reference concrete details from the conversation such as products, quantities, locations, companies, timelines, or requirements discussed",
       "priority": "high" | "medium" | "low"
     }
   ],
@@ -84,7 +84,8 @@ RULES:
 3. Suggest 7-12 sections tailored to the specific project and industry.
 4. Be honest about confidence — if info is sparse, say so.
 5. Infer document type from context if not explicitly stated (default to RFP).
-6. Return ONLY the JSON. No markdown fences, no explanations.`;
+6. Return ONLY the JSON. No markdown fences, no explanations.
+7. CRITICAL: Each section description MUST be specific to this project. Never use generic placeholder descriptions like "Details of what is needed". Instead, reference actual details — e.g. "Supply and delivery of 100 ergonomic office chairs to the London headquarters" instead of "Scope of supply for the project".`;
 
 /**
  * Generate a structured brief from the planning conversation.

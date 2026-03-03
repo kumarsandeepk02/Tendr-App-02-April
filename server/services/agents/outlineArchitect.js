@@ -129,13 +129,17 @@ async function generateOutline({ answers, fileContext, docType, confirmedSection
 
   userPrompt += `
 Return a JSON array of 7-12 section objects. Each object MUST have:
-- "title": Section heading (e.g., "Background / Project Overview")
-- "description": 1-sentence description of what this section covers
+- "title": Section heading (e.g., "Scope of Work")
+- "description": 2-3 sentences describing what this section will contain, incorporating SPECIFIC details from the project information above (not generic placeholders). Each description should preview the actual content that will be generated.
 - "contextKeys": Array of relevant answer keys from: ${ALL_ANSWER_KEYS.join(', ')}
 - "estimatedLength": "short" (under 200 words), "medium" (200-500 words), or "long" (500+ words)
 - "dependencies": Array of section titles this section references (usually empty)
 
-Tailor sections to this specific project and industry. Do NOT use a generic template blindly.
+IMPORTANT RULES:
+1. Each section description must contain substantive, project-specific content hints — not just generic one-liners.
+2. Tailor sections to this specific project and industry. Do NOT use a generic template blindly.
+3. Reference actual details from the project info (products, quantities, locations, timelines, etc.) in descriptions.
+
 Return ONLY the JSON array, no other text.`;
 
   const systemPrompt = `You are an expert procurement document architect. Your job is to design the optimal section structure for procurement documents. Return ONLY valid JSON — no markdown fences, no explanations, just the array.`;
