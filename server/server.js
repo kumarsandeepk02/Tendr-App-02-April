@@ -7,8 +7,15 @@ initSentry();
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
+const cookieParser = require('cookie-parser');
 const rateLimit = require('express-rate-limit');
 const path = require('path');
+
+// ── Fail fast if SESSION_SECRET is missing ─────────────────────────────────
+if (!process.env.SESSION_SECRET) {
+  console.error('FATAL: SESSION_SECRET is required. Generate one with: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"');
+  process.exit(1);
+}
 
 const chatRoutes = require('./routes/chat');
 const uploadRoutes = require('./routes/upload');
@@ -48,6 +55,7 @@ app.use(cors({
 }));
 
 app.use(express.json({ limit: '10mb' }));
+app.use(cookieParser(process.env.SESSION_SECRET));
 
 // ── Rate Limiting ───────────────────────────────────────────────────────────
 
@@ -86,16 +94,16 @@ app.get('/api/health', (req, res) => {
 app.use('/api/projects', authMiddleware, projectRoutes);
 app.use('/api/upload', authMiddleware, uploadRoutes);
 
-// Chat routes: auth + prompt defense + AI rate limit on heavy endpoints
-app.use('/api/chat', authMiddleware, promptDefenseMiddleware, chatRoutes);
-
-// Apply AI rate limit to specific heavy endpoints
+// AI rate limit on heavy endpoints — MUST be mounted before chat routes
 app.use('/api/chat/v2/pipeline', aiLimiter);
 app.use('/api/chat/v2/planning', aiLimiter);
 app.use('/api/chat/v2/brief', aiLimiter);
 app.use('/api/chat/v2/readiness', aiLimiter);
 app.use('/api/chat/regenerate-section', aiLimiter);
 app.use('/api/chat/pipeline', aiLimiter);
+
+// Chat routes: auth + prompt defense
+app.use('/api/chat', authMiddleware, promptDefenseMiddleware, chatRoutes);
 
 // ── Start ───────────────────────────────────────────────────────────────────
 app.listen(PORT, () => {

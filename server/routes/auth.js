@@ -1,4 +1,5 @@
 const express = require('express');
+const crypto = require('crypto');
 const { WorkOS } = require('@workos-inc/node');
 const { authMiddleware, getAuth } = require('../middleware/auth');
 
@@ -8,62 +9,125 @@ const workos = process.env.WORKOS_API_KEY
   ? new WorkOS(process.env.WORKOS_API_KEY)
   : null;
 
-const IS_DEV = !process.env.WORKOS_API_KEY || process.env.NODE_ENV === 'development';
+const IS_PROD = process.env.NODE_ENV === 'production';
+
+function isDevBypassAllowed() {
+  return (
+    process.env.ALLOW_DEV_AUTH_BYPASS === 'true' && !IS_PROD
+  );
+}
+
+/**
+ * Race a promise against a timeout.
+ */
+function withTimeout(promise, ms, message) {
+  let timer;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(message)), ms);
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
+
+/** Shared cookie options for the session cookie. */
+function sessionCookieOptions() {
+  return {
+    httpOnly: true,
+    secure: IS_PROD,
+    sameSite: 'lax',
+    path: '/',
+    maxAge: 24 * 60 * 60 * 1000, // 24 hours
+    signed: true,
+  };
+}
 
 /**
  * GET /api/auth/login
  * Returns the WorkOS authorization URL for the frontend to redirect to.
  */
 router.get('/login', (req, res) => {
-  if (IS_DEV) {
+  if (isDevBypassAllowed()) {
     return res.json({
       dev: true,
-      message: 'Dev mode — no login required. Send x-user-id header with API requests.',
+      message: 'Dev mode — call /api/auth/me to authenticate.',
     });
   }
+
+  if (!workos) {
+    return res.status(503).json({ error: 'Authentication service not configured' });
+  }
+
+  // Generate cryptographically random state for CSRF protection
+  const state = crypto.randomBytes(32).toString('hex');
+
+  // Store state in a short-lived signed cookie
+  res.cookie('oauth_state', state, {
+    httpOnly: true,
+    secure: IS_PROD,
+    sameSite: 'lax',
+    maxAge: 10 * 60 * 1000, // 10 minutes
+    signed: true,
+  });
 
   const authorizationUrl = workos.userManagement.getAuthorizationUrl({
     provider: 'authkit',
     clientId: process.env.WORKOS_CLIENT_ID,
     redirectUri: process.env.WORKOS_REDIRECT_URI,
+    state,
   });
 
   res.json({ url: authorizationUrl });
 });
 
 /**
- * GET /api/auth/callback?code=xxx
+ * GET /api/auth/callback?code=xxx&state=yyy
  * Exchanges the authorization code for a user + session.
+ * Sets an HttpOnly session cookie instead of returning tokens in the URL.
  */
 router.get('/callback', async (req, res) => {
   try {
-    if (IS_DEV) {
-      return res.redirect(`${process.env.FRONTEND_URL}?auth=dev`);
+    if (isDevBypassAllowed()) {
+      return res.redirect(`${process.env.FRONTEND_URL}/auth/callback`);
     }
 
-    const { code } = req.query;
+    if (!workos) {
+      return res.redirect(`${process.env.FRONTEND_URL}/auth/error?reason=not_configured`);
+    }
+
+    const { code, state } = req.query;
+
+    // ── Validate OAuth state ───────────────────────────────────────────
+    const storedState = req.signedCookies?.oauth_state;
+    res.clearCookie('oauth_state', { path: '/' });
+
+    if (!state || !storedState || state !== storedState) {
+      return res.redirect(`${process.env.FRONTEND_URL}/auth/error?reason=invalid_state`);
+    }
+
     if (!code) {
-      return res.status(400).json({ error: 'Missing authorization code' });
+      return res.redirect(`${process.env.FRONTEND_URL}/auth/error?reason=missing_code`);
     }
 
-    const result = await workos.userManagement.authenticateWithCode({
-      code,
-      clientId: process.env.WORKOS_CLIENT_ID,
-    });
-
-    // Return the access token and user info to the frontend
-    res.redirect(
-      `${process.env.FRONTEND_URL}/auth/callback?token=${result.accessToken}&user=${encodeURIComponent(JSON.stringify({
-        id: result.user.id,
-        email: result.user.email,
-        firstName: result.user.firstName,
-        lastName: result.user.lastName,
-        profilePictureUrl: result.user.profilePictureUrl,
-      }))}`
+    // ── Exchange code server-side (with timeout) ───────────────────────
+    const result = await withTimeout(
+      workos.userManagement.authenticateWithCode({
+        code,
+        clientId: process.env.WORKOS_CLIENT_ID,
+      }),
+      10_000,
+      'Authentication provider timed out'
     );
+
+    // ── Set HttpOnly session cookie ────────────────────────────────────
+    res.cookie('tendr_session', result.accessToken, sessionCookieOptions());
+
+    // Redirect to frontend callback without any tokens in the URL
+    res.redirect(`${process.env.FRONTEND_URL}/auth/callback`);
   } catch (error) {
     console.error('Auth callback error:', error.message);
-    res.redirect(`${process.env.FRONTEND_URL}/auth/error`);
+    const reason = error.message.includes('timed out') ? 'timeout' : 'exchange_failed';
+    res.redirect(`${process.env.FRONTEND_URL}/auth/error?reason=${reason}`);
   }
 });
 
@@ -78,9 +142,10 @@ router.get('/me', authMiddleware, (req, res) => {
 
 /**
  * POST /api/auth/logout
- * Clears session (frontend handles token removal).
+ * Clears the session cookie.
  */
 router.post('/logout', (req, res) => {
+  res.clearCookie('tendr_session', { path: '/' });
   res.json({ success: true });
 });
 

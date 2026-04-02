@@ -8,14 +8,39 @@ const workos = process.env.WORKOS_API_KEY
   ? new WorkOS(process.env.WORKOS_API_KEY)
   : null;
 
-const IS_DEV = !process.env.WORKOS_API_KEY || process.env.NODE_ENV === 'development';
+const IS_PROD = process.env.NODE_ENV === 'production';
+
+/**
+ * Dev bypass is only allowed when ALL of these are true:
+ *   1. ALLOW_DEV_AUTH_BYPASS is explicitly "true"
+ *   2. Not in production
+ *   3. Request originates from localhost
+ */
+function isDevBypassAllowed(req) {
+  if (process.env.ALLOW_DEV_AUTH_BYPASS !== 'true') return false;
+  if (IS_PROD) return false;
+  const ip = req.ip || req.connection?.remoteAddress || '';
+  const localhostIps = ['127.0.0.1', '::1', '::ffff:127.0.0.1', 'localhost'];
+  return localhostIps.includes(ip);
+}
+
+/**
+ * Race a promise against a timeout. Rejects with `message` if the timeout fires first.
+ */
+function withTimeout(promise, ms, message) {
+  let timer;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(message)), ms);
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
 
 /**
  * Resolve or create a profile row for a given WorkOS user ID.
- * In dev mode, creates a dev profile automatically.
  */
 async function resolveProfile(workosUserId, userData = {}) {
-  // Check if profile exists
   const existing = await db
     .select()
     .from(profiles)
@@ -26,7 +51,6 @@ async function resolveProfile(workosUserId, userData = {}) {
     return existing[0];
   }
 
-  // Auto-create profile
   const [newProfile] = await db
     .insert(profiles)
     .values({
@@ -44,15 +68,15 @@ async function resolveProfile(workosUserId, userData = {}) {
 /**
  * Auth middleware.
  *
- * Production: validates WorkOS session token from Authorization header.
- * Dev mode: accepts x-user-id header (defaults to 'dev-user'), auto-creates profile.
+ * Production: validates WorkOS session token from signed session cookie.
+ * Dev bypass: only when ALLOW_DEV_AUTH_BYPASS=true, non-production, localhost.
+ * Fails closed if auth config is missing.
  */
 async function authMiddleware(req, res, next) {
   try {
-    // ── Dev bypass ────────────────────────────────────────────────────────
-    if (IS_DEV) {
-      const devUserId = req.headers['x-user-id'] || 'dev-user';
-      const workosUserId = `dev-${devUserId}`;
+    // ── Gated dev bypass (localhost only, explicit opt-in) ────────────────
+    if (isDevBypassAllowed(req)) {
+      const workosUserId = 'dev-dev-user';
       const profile = await resolveProfile(workosUserId, {
         fullName: 'Dev User',
       });
@@ -65,16 +89,24 @@ async function authMiddleware(req, res, next) {
       return next();
     }
 
-    // ── Production: validate WorkOS session ───────────────────────────────
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({ error: 'Missing authorization token' });
+    // ── Fail closed if WorkOS is not configured ──────────────────────────
+    if (!workos) {
+      return res.status(503).json({ error: 'Authentication service not configured' });
     }
 
-    const token = authHeader.split(' ')[1];
+    // ── Read token from signed session cookie ────────────────────────────
+    const token = req.signedCookies?.tendr_session;
+    if (!token) {
+      return res.status(401).json({ error: 'Missing session' });
+    }
 
-    // Verify the session with WorkOS
-    const session = await workos.userManagement.getUser(token);
+    // Verify the session with WorkOS (bounded timeout)
+    const session = await withTimeout(
+      workos.userManagement.getUser(token),
+      10_000,
+      'Authentication service timed out'
+    );
+
     if (!session || !session.id) {
       return res.status(401).json({ error: 'Invalid session' });
     }
@@ -92,6 +124,9 @@ async function authMiddleware(req, res, next) {
     next();
   } catch (error) {
     console.error('Auth error:', error.message);
+    if (error.message === 'Authentication service timed out') {
+      return res.status(504).json({ error: 'Authentication service timed out. Please try again.' });
+    }
     return res.status(401).json({ error: 'Authentication failed' });
   }
 }

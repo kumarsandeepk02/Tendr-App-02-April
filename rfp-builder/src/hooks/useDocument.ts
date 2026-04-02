@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { DocumentState, DocumentSection, QualityReview, SectionProgress, DocumentAnalysis, CompetitiveIntelligence, GenerationStage } from '../types';
 import { v4 as uuidv4 } from 'uuid';
+import { api } from '../utils/api';
 
 function createInitialState(): DocumentState {
   return {
@@ -57,6 +58,27 @@ export function useDocument(projectId?: string | null) {
     }, 500);
     return () => clearTimeout(timeout);
   }, [documentState, isStreaming, projectId]);
+
+  // Server-side autosave for sections (longer debounce to avoid thrashing)
+  const serverSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (isStreaming || !projectId || documentState.sections.length === 0) return;
+    if (serverSaveTimerRef.current) clearTimeout(serverSaveTimerRef.current);
+    serverSaveTimerRef.current = setTimeout(() => {
+      api.patch(`/api/projects/${projectId}/sections`, {
+        sections: documentState.sections.map((s) => ({
+          title: s.title,
+          content: s.content,
+          sectionType: 'informational',
+        })),
+      }).catch((err: unknown) => {
+        console.warn('Server section autosave failed:', err);
+      });
+    }, 3000);
+    return () => {
+      if (serverSaveTimerRef.current) clearTimeout(serverSaveTimerRef.current);
+    };
+  }, [documentState.sections, isStreaming, projectId]);
 
   const updateMeta = useCallback(
     (updates: Partial<DocumentState['meta']>) => {

@@ -159,8 +159,10 @@ router.post('/v2/brief', async (req, res) => {
     res.json(brief);
   } catch (error) {
     console.error('V2 Brief generation error:', error.message);
-    res.status(500).json({
-      error: 'Failed to generate brief. Please try again.',
+    const status = error.code === 'BRIEF_PARSE_ERROR' ? 422 : 500;
+    res.status(status).json({
+      error: error.message || 'Failed to generate brief. Please try again.',
+      retryable: error.retryable || false,
     });
   }
 });

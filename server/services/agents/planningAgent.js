@@ -95,27 +95,11 @@ async function generateBrief({ messages, fileContext, model }) {
     return brief;
   } catch (err) {
     console.error('Brief generation JSON parse failed:', err.message);
-    return {
-      docType: 'RFP',
-      projectTitle: 'Untitled Project',
-      projectDescription: 'Unable to extract description from conversation.',
-      industry: 'General',
-      requirements: [],
-      evaluationCriteria: [],
-      timeline: 'Not specified',
-      additionalContext: '',
-      suggestedSections: [
-        { title: 'Background / Project Overview', description: 'Covers the business context, organizational background, and objectives driving this procurement. Edit this to add specific details about your project.', priority: 'high' },
-        { title: 'Scope of Work', description: 'Defines the specific deliverables, services, or products being procured. Edit this to describe exactly what you need vendors to provide.', priority: 'high' },
-        { title: 'Technical Requirements', description: 'Details the technical specifications, standards, and capabilities required. Edit this to include your specific technical needs.', priority: 'high' },
-        { title: 'Vendor Qualifications', description: 'Outlines the minimum experience, certifications, and capabilities vendors must demonstrate to be considered.', priority: 'medium' },
-        { title: 'Evaluation Criteria', description: 'Defines how vendor proposals will be scored and compared, including weighting of technical, cost, and experience factors.', priority: 'medium' },
-        { title: 'Timeline & Milestones', description: 'Establishes key dates for the procurement process and expected project delivery milestones. Edit to add your specific timeline.', priority: 'medium' },
-        { title: 'Submission Instructions', description: 'Provides vendors with format requirements, deadlines, contact information, and the process for submitting questions.', priority: 'low' },
-        { title: 'Terms & Conditions', description: 'Covers contractual terms, payment conditions, intellectual property, confidentiality, and compliance requirements.', priority: 'low' },
-      ],
-      confidence: { overall: 0.3, missingInfo: ['Most project details were not captured'] },
-    };
+    console.error('Raw response (first 500 chars):', response.substring(0, 500));
+    const error = new Error('Failed to generate brief: AI returned invalid JSON. Please try again.');
+    error.code = 'BRIEF_PARSE_ERROR';
+    error.retryable = true;
+    throw error;
   }
 }
 

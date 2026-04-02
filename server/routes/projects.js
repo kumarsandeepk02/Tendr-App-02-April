@@ -242,23 +242,24 @@ router.patch('/:id/sections', async (req, res) => {
       return res.status(400).json({ error: 'sections must be an array' });
     }
 
-    // Delete existing sections and insert new ones (simpler than upsert for reordering)
-    await db.delete(documentSections).where(eq(documentSections.projectId, id));
+    // Atomic: delete + insert + timestamp in a single transaction
+    await db.transaction(async (tx) => {
+      await tx.delete(documentSections).where(eq(documentSections.projectId, id));
 
-    if (sectionData.length > 0) {
-      await db.insert(documentSections).values(
-        sectionData.map((s, i) => ({
-          projectId: id,
-          title: s.title,
-          content: s.content || '',
-          sectionType: s.sectionType || 'informational',
-          order: i,
-        }))
-      );
-    }
+      if (sectionData.length > 0) {
+        await tx.insert(documentSections).values(
+          sectionData.map((s, i) => ({
+            projectId: id,
+            title: s.title,
+            content: s.content || '',
+            sectionType: s.sectionType || 'informational',
+            order: i,
+          }))
+        );
+      }
 
-    // Update project timestamp
-    await db.update(projects).set({ updatedAt: new Date() }).where(eq(projects.id, id));
+      await tx.update(projects).set({ updatedAt: new Date() }).where(eq(projects.id, id));
+    });
 
     res.json({ success: true });
   } catch (error) {

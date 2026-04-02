@@ -17,6 +17,7 @@ const { anchorSystemPrompt, validateOutput, logInjectionAttempt } = require('./s
 
 const client = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
+  timeout: 120_000, // 2 minute default timeout for all requests
 });
 
 // Supported models — add new models here
@@ -75,7 +76,7 @@ async function sendMessage(messages, customSystemPrompt, { model } = {}) {
     temperature: 0.4,
     system: systemPrompt,
     messages: apiMessages,
-  });
+  }, { timeout: 60_000 });
 
   const textBlock = response.content.find((block) => block.type === 'text');
   return textBlock ? textBlock.text : '';
@@ -102,7 +103,7 @@ ${documentText.substring(0, 8000)}`;
     temperature: 0.4,
     system: SYSTEM_PROMPT,
     messages: [{ role: 'user', content: prompt }],
-  });
+  }, { timeout: 60_000 });
 
   const textBlock = response.content.find((block) => block.type === 'text');
   const text = textBlock ? textBlock.text : '[]';
@@ -161,7 +162,7 @@ async function agentCall(systemPrompt, userPrompt, { maxTokens = 2000, temperatu
     temperature,
     system: anchorSystemPrompt(systemPrompt),
     messages,
-  });
+  }, { timeout: 90_000 });
 
   const textBlock = response.content.find((block) => block.type === 'text');
   const output = textBlock ? textBlock.text : '';

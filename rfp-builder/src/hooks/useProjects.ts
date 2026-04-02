@@ -159,20 +159,21 @@ export function useProjects() {
   );
 
   const deleteProject = useCallback(
-    (projectId: string) => {
-      // Remove local draft
+    async (projectId: string) => {
+      // Snapshot for rollback
+      const snapshot = projects;
+      const draftBackup = localStorage.getItem(projectStorageKey(projectId));
+
+      // Optimistic: remove from state
       localStorage.removeItem(projectStorageKey(projectId));
 
-      // Remove from state
       setProjects((prev) => {
         const remaining = prev.filter((p) => p.id !== projectId);
 
-        // If we deleted the active project, switch to first remaining
         if (activeProjectId === projectId) {
           if (remaining.length > 0) {
             setActiveProjectId(remaining[0].id);
           } else {
-            // Create a new project
             createProjectOnServer().then((newProject) => {
               if (newProject) {
                 setProjects((p) => [...p, newProject]);
@@ -185,12 +186,21 @@ export function useProjects() {
         return remaining;
       });
 
-      // Delete on server (don't block UI)
-      api.delete(`/api/projects/${projectId}`).catch((err) => {
-        console.error('Failed to delete project on server:', err);
-      });
+      // Confirm with server — rollback on failure
+      try {
+        await api.delete(`/api/projects/${projectId}`);
+      } catch (err) {
+        console.error('Failed to delete project on server, rolling back:', err);
+        setProjects(snapshot);
+        if (draftBackup) {
+          localStorage.setItem(projectStorageKey(projectId), draftBackup);
+        }
+        if (activeProjectId === projectId) {
+          setActiveProjectId(projectId);
+        }
+      }
     },
-    [activeProjectId]
+    [activeProjectId, projects]
   );
 
   const updateProjectMeta = useCallback(
