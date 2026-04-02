@@ -58,16 +58,17 @@ const ALL_ANSWER_KEYS = [
   'requirements', 'evaluation_criteria', 'deadline', 'additional_sections',
 ];
 
+// responseType: 'narrative' = context-setting prose, 'vendor_response' = structured questions vendors must answer
 const DEFAULT_OUTLINE = [
-  { title: 'Background / Project Overview', description: 'Context on the issuing organization and project purpose', contextKeys: ['project_title', 'project_description'], estimatedLength: 'medium', dependencies: [] },
-  { title: 'Scope of Work', description: 'Detailed description of work to be performed', contextKeys: ['project_description', 'requirements'], estimatedLength: 'long', dependencies: [] },
-  { title: 'Technical Requirements', description: 'Specific technical specifications and standards', contextKeys: ['requirements'], estimatedLength: 'long', dependencies: [] },
-  { title: 'Vendor Qualifications', description: 'Required vendor experience, certifications, and capabilities', contextKeys: ['requirements', 'evaluation_criteria'], estimatedLength: 'medium', dependencies: [] },
-  { title: 'Evaluation Criteria', description: 'How proposals will be scored and ranked', contextKeys: ['evaluation_criteria'], estimatedLength: 'medium', dependencies: [] },
-  { title: 'Timeline & Milestones', description: 'Project schedule, key dates, and deliverable deadlines', contextKeys: ['deadline'], estimatedLength: 'short', dependencies: [] },
-  { title: 'Submission Instructions', description: 'How, when, and where to submit responses', contextKeys: ['deadline'], estimatedLength: 'short', dependencies: [] },
-  { title: 'Supplier Response Questions', description: 'Structured questions vendors must answer', contextKeys: ['requirements', 'evaluation_criteria'], estimatedLength: 'long', dependencies: [] },
-  { title: 'Terms & Conditions', description: 'Legal terms, contract conditions, and compliance requirements', contextKeys: ['additional_sections'], estimatedLength: 'medium', dependencies: [] },
+  { title: 'Background / Project Overview', description: 'Context on the issuing organization and project purpose', contextKeys: ['project_title', 'project_description'], estimatedLength: 'medium', dependencies: [], responseType: 'narrative' },
+  { title: 'Scope of Work', description: 'Detailed description of work to be performed', contextKeys: ['project_description', 'requirements'], estimatedLength: 'long', dependencies: [], responseType: 'narrative' },
+  { title: 'Technical Requirements', description: 'Technical capabilities and specifications vendors must address', contextKeys: ['requirements'], estimatedLength: 'long', dependencies: [], responseType: 'vendor_response' },
+  { title: 'Vendor Qualifications', description: 'Experience, certifications, and capabilities vendors must demonstrate', contextKeys: ['requirements', 'evaluation_criteria'], estimatedLength: 'medium', dependencies: [], responseType: 'vendor_response' },
+  { title: 'Evaluation Criteria', description: 'How proposals will be scored and ranked', contextKeys: ['evaluation_criteria'], estimatedLength: 'medium', dependencies: [], responseType: 'narrative' },
+  { title: 'Timeline & Milestones', description: 'Project schedule, key dates, and deliverable deadlines', contextKeys: ['deadline'], estimatedLength: 'short', dependencies: [], responseType: 'narrative' },
+  { title: 'Submission Instructions', description: 'How, when, and where to submit responses', contextKeys: ['deadline'], estimatedLength: 'short', dependencies: [], responseType: 'narrative' },
+  { title: 'Pricing & Commercial', description: 'Pricing structure, cost breakdown, and commercial terms vendors must provide', contextKeys: ['requirements', 'evaluation_criteria'], estimatedLength: 'long', dependencies: [], responseType: 'vendor_response' },
+  { title: 'Terms & Conditions', description: 'Legal terms, contract conditions, and compliance requirements', contextKeys: ['additional_sections'], estimatedLength: 'medium', dependencies: [], responseType: 'narrative' },
 ];
 
 /**
@@ -86,12 +87,14 @@ async function generateOutline({ answers, fileContext, docType, confirmedSection
         // Support both string[] (legacy) and {title, description}[] formats
         const title = typeof section === 'string' ? section : section.title;
         const description = typeof section === 'string' ? '' : (section.description || '');
+        const responseType = (typeof section === 'object' && section.responseType) || inferResponseType(title);
         return {
           title,
           description,
           contextKeys: inferContextKeys(title, answers),
           estimatedLength: inferLength(title),
           dependencies: [],
+          responseType,
         };
       }),
       industry,
@@ -134,11 +137,19 @@ Return a JSON array of 7-12 section objects. Each object MUST have:
 - "contextKeys": Array of relevant answer keys from: ${ALL_ANSWER_KEYS.join(', ')}
 - "estimatedLength": "short" (under 200 words), "medium" (200-500 words), or "long" (500+ words)
 - "dependencies": Array of section titles this section references (usually empty)
+- "responseType": Either "narrative" or "vendor_response"
+
+RESPONSE TYPE RULES — THIS IS CRITICAL:
+- "narrative": Context-setting sections that vendors READ but don't respond to directly. Use for: Introduction, Background, Scope of Work, Evaluation Criteria, Timeline, Submission Instructions, Terms & Conditions.
+- "vendor_response": Sections where vendors must RESPOND with specific, structured answers. Use for: Technical Requirements, Vendor Qualifications, Pricing/Commercial, Security & Compliance, Implementation Approach, Support & SLAs, and any domain-specific requirement sections.
+
+The purpose of an RFP is to collect COMPARABLE responses from vendors. Sections marked "vendor_response" will be generated with numbered questions that all vendors must answer identically, enabling apples-to-apples comparison.
 
 IMPORTANT RULES:
 1. Each section description must contain substantive, project-specific content hints — not just generic one-liners.
 2. Tailor sections to this specific project and industry. Do NOT use a generic template blindly.
 3. Reference actual details from the project info (products, quantities, locations, timelines, etc.) in descriptions.
+4. A well-structured RFP typically has 3-5 "narrative" sections and 4-6 "vendor_response" sections.
 
 Return ONLY the JSON array, no other text.`;
 
@@ -164,6 +175,7 @@ Return ONLY the JSON array, no other text.`;
       contextKeys: Array.isArray(item.contextKeys) ? item.contextKeys.filter(k => ALL_ANSWER_KEYS.includes(k)) : [],
       estimatedLength: ['short', 'medium', 'long'].includes(item.estimatedLength) ? item.estimatedLength : 'medium',
       dependencies: Array.isArray(item.dependencies) ? item.dependencies : [],
+      responseType: ['narrative', 'vendor_response'].includes(item.responseType) ? item.responseType : inferResponseType(item.title || ''),
     }));
 
     return { outline, industry };
@@ -188,6 +200,16 @@ function inferContextKeys(title, answers) {
 
   // Deduplicate
   return [...new Set(keys)].filter(k => ALL_ANSWER_KEYS.includes(k));
+}
+
+// Heuristic: infer whether vendors need to respond to this section
+function inferResponseType(title) {
+  const lower = title.toLowerCase();
+  // Narrative sections — vendors read but don't respond directly
+  const narrativePatterns = ['background', 'overview', 'introduction', 'scope of work', 'evaluation criteria', 'timeline', 'milestone', 'submission', 'terms', 'condition', 'instruction', 'schedule'];
+  if (narrativePatterns.some(p => lower.includes(p))) return 'narrative';
+  // Vendor response sections — vendors must answer
+  return 'vendor_response';
 }
 
 // Heuristic: infer section length from title

@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import axios from 'axios';
+import { api, authFetch, API_URL } from '../utils/api';
 import { ChatMessage, GuidedStep, ChatRole, UnifiedFlowPhase, OutlineSection, QualityReview, UploadedDocument, DocumentAnalysis, CompetitiveIntelligence, ModelOption } from '../types';
 import {
   GUIDED_QUESTIONS,
@@ -13,7 +13,7 @@ import {
   ADAPTIVE_STEPS,
 } from '../utils/prompts';
 
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
+// API_URL imported from ../utils/api
 
 function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).substr(2, 9);
@@ -59,7 +59,7 @@ export function useChat(options?: UseChatOptions) {
 
   // Fetch available models on mount
   useEffect(() => {
-    axios.get(`${API_URL}/api/chat/models`)
+    api.get('/api/chat/models')
       .then((res) => {
         const data = res.data;
         setAvailableModels(data.models || []);
@@ -160,7 +160,7 @@ export function useChat(options?: UseChatOptions) {
 
         const systemAddendum = buildQuestionSystemAddendum(guidedStep);
 
-        const res = await axios.post(`${API_URL}/api/chat`, {
+        const res = await api.post('/api/chat', {
           messages: apiMessages,
           systemPrompt: systemAddendum || undefined,
           model: selectedModel || undefined,
@@ -204,7 +204,7 @@ export function useChat(options?: UseChatOptions) {
     async (nextStep: GuidedStep): Promise<string | null> => {
       try {
         const prompt = buildAdaptiveQuestionPrompt(nextStep, gatheredAnswers);
-        const res = await axios.post(`${API_URL}/api/chat`, {
+        const res = await api.post('/api/chat', {
           messages: [{ role: 'user', content: prompt }],
           systemPrompt: 'You are helping a user build a procurement document. Generate exactly ONE contextual follow-up question. Output ONLY the question text, nothing else. Use **bold** for key terms. Max 2 sentences.',
           model: selectedModel || undefined,
@@ -487,7 +487,7 @@ export function useChat(options?: UseChatOptions) {
         { role: 'user' as const, content: userPrompt },
       ];
 
-      const response = await fetch(`${API_URL}/api/chat/stream`, {
+      const response = await authFetch(`${API_URL}/api/chat/stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -511,7 +511,7 @@ export function useChat(options?: UseChatOptions) {
     async (fileContext?: string, confirmedSections?: string[]) => {
       const docType = (gatheredAnswers.doc_type?.toUpperCase().includes('RFI') ? 'RFI' : 'RFP') as 'RFI' | 'RFP';
 
-      const response = await fetch(`${API_URL}/api/chat/pipeline`, {
+      const response = await authFetch(`${API_URL}/api/chat/pipeline`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -534,7 +534,7 @@ export function useChat(options?: UseChatOptions) {
       // can drop late events), fetch it via a dedicated API call.
       if (!pipelineResultsRef.current.competitiveIntel) {
         try {
-          const intelRes = await fetch(`${API_URL}/api/chat/competitive-intel`, {
+          const intelRes = await authFetch(`${API_URL}/api/chat/competitive-intel`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ docType, answers: gatheredAnswers, model: selectedModel || undefined }),
@@ -618,7 +618,7 @@ export function useChat(options?: UseChatOptions) {
       try {
         const outlinePrompt = buildOutlinePrompt(gatheredAnswers, fileContext);
 
-        const res = await axios.post(`${API_URL}/api/chat`, {
+        const res = await api.post('/api/chat', {
           messages: [{ role: 'user', content: outlinePrompt }],
           systemPrompt: 'You are an expert procurement consultant. Return ONLY a valid JSON array as requested. No other text.',
           model: selectedModel || undefined,
@@ -728,7 +728,7 @@ export function useChat(options?: UseChatOptions) {
       optionsRef.current?.onSectionRegenerationStart?.(sectionId);
 
       try {
-        const response = await fetch(`${API_URL}/api/chat/regenerate-section`, {
+        const response = await authFetch(`${API_URL}/api/chat/regenerate-section`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -810,7 +810,7 @@ export function useChat(options?: UseChatOptions) {
       const docType = gatheredAnswers.doc_type?.toUpperCase().includes('RFI') ? 'RFI' : 'RFP';
 
       try {
-        const response = await fetch(`${API_URL}/api/chat/regenerate-section`, {
+        const response = await authFetch(`${API_URL}/api/chat/regenerate-section`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

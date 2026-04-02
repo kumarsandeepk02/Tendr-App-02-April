@@ -1,4 +1,5 @@
 const { agentCall } = require('../claudeService');
+const { repairAndParse } = require('../security/jsonRepair');
 
 const REVIEW_SYSTEM_PROMPT = `You are a senior procurement quality reviewer. Your job is to analyze a completed RFI/RFP document and identify issues, inconsistencies, and missing elements.
 
@@ -76,7 +77,7 @@ async function reviewDocument({ fullDocument, answers, docType, industryProfile,
   userPrompt += `DOCUMENT TO REVIEW:\n\n${truncatedDoc}\n\nProvide your quality review as JSON.`;
 
   try {
-    const response = await agentCall(REVIEW_SYSTEM_PROMPT, userPrompt, { maxTokens: 2000, temperature: 0.2, model });
+    const response = await agentCall(REVIEW_SYSTEM_PROMPT, userPrompt, { maxTokens: 4000, temperature: 0.2, model });
 
     // Parse JSON — handle possible markdown fences
     let jsonStr = response;
@@ -85,13 +86,8 @@ async function reviewDocument({ fullDocument, answers, docType, industryProfile,
       jsonStr = fenceMatch[1].trim();
     }
 
-    // Try to extract JSON object
-    const objMatch = jsonStr.match(/\{[\s\S]*\}/);
-    if (objMatch) {
-      jsonStr = objMatch[0];
-    }
-
-    const parsed = JSON.parse(jsonStr);
+    const parsed = repairAndParse(jsonStr);
+    if (!parsed) throw new Error('Could not parse quality review JSON');
 
     // Validate structure
     return {

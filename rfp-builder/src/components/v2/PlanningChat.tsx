@@ -3,7 +3,7 @@ import { ChatMessage, UploadedDocument } from '../../types';
 import MessageBubble from '../MessageBubble';
 import TextareaAutosize from 'react-textarea-autosize';
 import { useDropzone } from 'react-dropzone';
-import axios from 'axios';
+import { api } from '../../utils/api';
 import {
   Send,
   Loader2,
@@ -79,7 +79,7 @@ const PlanningChat: React.FC<PlanningChatProps> = ({
       try {
         const formData = new FormData();
         formData.append('file', file);
-        const res = await axios.post(`${API_URL}/api/upload`, formData, {
+        const res = await api.post('/api/upload', formData, {
           headers: { 'Content-Type': 'multipart/form-data' },
         });
         onUpload(res.data.text || '', file.name);
@@ -198,7 +198,7 @@ const PlanningChat: React.FC<PlanningChatProps> = ({
                   try {
                     const formData = new FormData();
                     formData.append('file', file);
-                    const res = await axios.post(`${API_URL}/api/upload`, formData, {
+                    const res = await api.post('/api/upload', formData, {
                       headers: { 'Content-Type': 'multipart/form-data' },
                     });
                     onUpload(res.data.text || '', file.name);

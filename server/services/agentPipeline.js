@@ -82,6 +82,7 @@ async function runPipeline(config, callbacks) {
             previousSections: completedSections.slice(-3), // Last 3 sections for continuity
             industryProfile: industry,
             estimatedLength: section.estimatedLength,
+            responseType: section.responseType || 'narrative',
             model,
           },
           (chunk) => {

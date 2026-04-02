@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { NarrationMessage, NarrationAgent, SectionProgress } from '../../types';
 import { Loader2, CheckCircle2, Sparkles, Brain, PenTool, ShieldCheck, ArrowRight } from 'lucide-react';
 
@@ -137,15 +137,8 @@ const GenerationNarrator: React.FC<GenerationNarratorProps> = ({
         </div>
       </div>
 
-      {/* Thinking animation at bottom */}
-      {isGenerating && (
-        <div className="px-6 py-3 border-t border-gray-200 bg-white">
-          <div className="flex items-center gap-2 text-xs text-gray-400">
-            <Loader2 size={12} className="animate-spin" />
-            <span>AI agents are working on your document...</span>
-          </div>
-        </div>
-      )}
+      {/* Working indicator with rotating quotes */}
+      {isGenerating && <WorkingQuotes />}
     </div>
   );
 };
@@ -217,6 +210,61 @@ const NarrationItem: React.FC<{ message: NarrationMessage }> = ({ message }) => 
               .replace(/\*(.*?)\*/g, '<em>$1</em>'),
           }}
         />
+      </div>
+    </div>
+  );
+};
+
+/** Rotating motivational quotes shown during generation */
+const WORKING_QUOTES = [
+  { text: "A good RFP is the difference between getting proposals and getting the right proposal.", icon: "📋" },
+  { text: "The time you invest in requirements now saves 10x in vendor negotiations later.", icon: "⏱️" },
+  { text: "Clear scope today means fewer change orders tomorrow.", icon: "🎯" },
+  { text: "The best procurement teams spend 80% of their time on the brief, 20% on evaluation.", icon: "💡" },
+  { text: "Every vague requirement is an invitation for vendors to charge more.", icon: "🔍" },
+  { text: "You're doing in minutes what used to take days. Your future self will thank you.", icon: "🚀" },
+  { text: "Great RFPs don't just find vendors — they attract the right ones.", icon: "🧲" },
+  { text: "Specificity is kindness. Vendors actually prefer detailed requirements.", icon: "🤝" },
+  { text: "A structured evaluation framework is worth more than a hundred reference calls.", icon: "⚖️" },
+  { text: "The procurement team that plans together, succeeds together.", icon: "👥" },
+  { text: "Think of your RFP as a first impression — make it count.", icon: "✨" },
+  { text: "Ambiguity in scope is the #1 cause of project overruns. You're fixing that right now.", icon: "🛡️" },
+];
+
+const WorkingQuotes: React.FC = () => {
+  const [quoteIndex, setQuoteIndex] = useState(() =>
+    Math.floor(Math.random() * WORKING_QUOTES.length)
+  );
+  const [isVisible, setIsVisible] = useState(true);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setIsVisible(false);
+      setTimeout(() => {
+        setQuoteIndex((prev) => (prev + 1) % WORKING_QUOTES.length);
+        setIsVisible(true);
+      }, 400);
+    }, 6000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const quote = WORKING_QUOTES[quoteIndex];
+
+  return (
+    <div className="px-6 py-4 border-t border-gray-200 bg-gradient-to-r from-indigo-50/50 to-white">
+      <div className="flex items-center gap-2 mb-2">
+        <Loader2 size={14} className="animate-spin text-indigo-500" />
+        <span className="text-sm font-medium text-indigo-700">Your team is on it...</span>
+      </div>
+      <div
+        className={`transition-all duration-400 ${
+          isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-1'
+        }`}
+      >
+        <p className="text-sm text-gray-500 leading-relaxed">
+          <span className="mr-1.5">{quote.icon}</span>
+          {quote.text}
+        </p>
       </div>
     </div>
   );

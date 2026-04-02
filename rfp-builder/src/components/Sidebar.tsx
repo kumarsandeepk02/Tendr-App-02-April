@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import { ProjectMeta } from '../types';
 import {
-  PanelLeftClose,
-  PanelLeftOpen,
   Plus,
   Trash2,
+  FolderKanban,
+  Settings,
+  HelpCircle,
+  User,
   FileText,
 } from 'lucide-react';
 
@@ -33,99 +35,6 @@ function formatRelativeTime(timestamp: number): string {
   return `${months}mo ago`;
 }
 
-const SidebarProjectItem: React.FC<{
-  project: ProjectMeta;
-  isActive: boolean;
-  isCollapsed: boolean;
-  disabled: boolean;
-  onSelect: () => void;
-  onDelete: () => void;
-}> = ({ project, isActive, isCollapsed, disabled, onSelect, onDelete }) => {
-  const [hovering, setHovering] = useState(false);
-
-  if (isCollapsed) {
-    return (
-      <button
-        onClick={onSelect}
-        disabled={disabled && !isActive}
-        title={project.title}
-        className={`w-full flex items-center justify-center py-2 mb-1 rounded-lg transition-colors ${
-          isActive
-            ? 'bg-indigo-50 text-indigo-700'
-            : disabled
-            ? 'opacity-40 cursor-not-allowed'
-            : 'text-gray-500 hover:bg-gray-100 hover:text-gray-700'
-        }`}
-      >
-        <div
-          className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold ${
-            isActive
-              ? 'bg-indigo-600 text-white'
-              : 'bg-gray-200 text-gray-600'
-          }`}
-        >
-          {project.title.charAt(0).toUpperCase()}
-        </div>
-      </button>
-    );
-  }
-
-  return (
-    <button
-      onClick={onSelect}
-      disabled={disabled && !isActive}
-      onMouseEnter={() => setHovering(true)}
-      onMouseLeave={() => setHovering(false)}
-      className={`w-full text-left px-3 py-2.5 mb-1 rounded-lg transition-colors group relative ${
-        isActive
-          ? 'bg-indigo-50 border-l-2 border-indigo-600 pl-2.5'
-          : disabled
-          ? 'opacity-40 cursor-not-allowed'
-          : 'hover:bg-gray-50 border-l-2 border-transparent'
-      }`}
-    >
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0 flex-1">
-          <p
-            className={`text-sm font-medium truncate ${
-              isActive ? 'text-indigo-900' : 'text-gray-800'
-            }`}
-          >
-            {project.title}
-          </p>
-          <div className="flex items-center gap-2 mt-1">
-            <span
-              className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${
-                project.status === 'completed'
-                  ? 'bg-green-100 text-green-700'
-                  : 'bg-amber-100 text-amber-700'
-              }`}
-            >
-              {project.status === 'completed' ? 'Completed' : 'Draft'}
-            </span>
-            <span className="text-[10px] text-gray-400">
-              {formatRelativeTime(project.updatedAt)}
-            </span>
-          </div>
-        </div>
-
-        {hovering && !isActive && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onDelete();
-            }}
-            className="flex-shrink-0 p-1 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded transition-colors"
-            title="Delete project"
-          >
-            <Trash2 size={13} />
-          </button>
-        )}
-      </div>
-    </button>
-  );
-};
-
 const Sidebar: React.FC<SidebarProps> = ({
   projects,
   activeProjectId,
@@ -136,86 +45,124 @@ const Sidebar: React.FC<SidebarProps> = ({
   onNewProject,
   onDeleteProject,
 }) => {
+  // Always render expanded for the new design
   return (
-    <aside
-      className={`flex flex-col border-r border-gray-200 bg-white transition-all duration-300 ${
-        isCollapsed ? 'w-12' : 'w-64'
-      }`}
-    >
-      {/* Header */}
-      <div
-        className={`flex items-center ${
-          isCollapsed ? 'justify-center' : 'justify-between'
-        } px-3 py-3 border-b border-gray-100`}
-      >
-        {!isCollapsed && (
-          <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
-            Projects
-          </span>
-        )}
+    <aside className="flex flex-col h-full w-56 bg-slate-50 border-r border-slate-200/60 flex-shrink-0">
+      {/* Brand */}
+      <div className="flex items-center gap-2.5 px-5 pt-6 pb-8">
+        <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white">
+          <FileText size={16} />
+        </div>
+        <div>
+          <h2 className="font-[Manrope] font-bold text-slate-900 text-sm leading-none">Tendr</h2>
+          <p className="text-[9px] uppercase tracking-[0.15em] text-slate-400 mt-0.5">Procurement AI</p>
+        </div>
+      </div>
+
+      {/* Nav */}
+      <nav className="px-3 mb-2">
         <button
-          onClick={onToggleCollapse}
-          className="p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors"
-          title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          onClick={onNewProject}
+          disabled={isGenerating}
+          className="w-full flex items-center gap-2.5 px-3 py-2 text-indigo-600 font-semibold text-sm bg-white rounded-lg shadow-sm border border-slate-200/60 hover:shadow-md transition-all disabled:opacity-40"
         >
-          {isCollapsed ? (
-            <PanelLeftOpen size={16} />
-          ) : (
-            <PanelLeftClose size={16} />
-          )}
+          <FolderKanban size={16} />
+          <span>Projects</span>
+          <Plus size={14} className="ml-auto opacity-60" />
         </button>
+      </nav>
+
+      {/* Recent Projects */}
+      <div className="flex-1 overflow-y-auto px-3 mt-4">
+        <h3 className="text-[9px] font-bold uppercase tracking-[0.15em] text-slate-400 px-3 mb-3">
+          Recent Projects
+        </h3>
+        <div className="space-y-1">
+          {projects.length === 0 ? (
+            <p className="text-xs text-slate-400 px-3 py-4 text-center">No projects yet</p>
+          ) : (
+            projects.slice(0, 8).map((project) => (
+              <SidebarProjectItem
+                key={project.id}
+                project={project}
+                isActive={project.id === activeProjectId}
+                disabled={isGenerating}
+                onSelect={() => onSelectProject(project.id)}
+                onDelete={() => onDeleteProject(project.id)}
+              />
+            ))
+          )}
+        </div>
       </div>
 
-      {/* New Project Button */}
-      <div className="px-2 py-2">
-        {isCollapsed ? (
-          <button
-            onClick={onNewProject}
-            disabled={isGenerating}
-            className="w-full flex items-center justify-center p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-            title="New Project"
-          >
-            <Plus size={16} />
-          </button>
-        ) : (
-          <button
-            onClick={onNewProject}
-            disabled={isGenerating}
-            className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            <Plus size={14} />
-            New Project
-          </button>
-        )}
-      </div>
-
-      {/* Project List */}
-      <div className="flex-1 overflow-y-auto px-2 py-1">
-        {projects.length === 0 ? (
-          <div className="text-center py-8">
-            <FileText
-              size={24}
-              className="mx-auto mb-2 text-gray-300"
-            />
-            {!isCollapsed && (
-              <p className="text-xs text-gray-400">No projects yet</p>
-            )}
-          </div>
-        ) : (
-          projects.map((project) => (
-            <SidebarProjectItem
-              key={project.id}
-              project={project}
-              isActive={project.id === activeProjectId}
-              isCollapsed={isCollapsed}
-              disabled={isGenerating}
-              onSelect={() => onSelectProject(project.id)}
-              onDelete={() => onDeleteProject(project.id)}
-            />
-          ))
-        )}
+      {/* Footer links */}
+      <div className="px-3 py-4 border-t border-slate-200/60 space-y-0.5">
+        <FooterLink icon={<Settings size={16} />} label="Settings" />
+        <FooterLink icon={<HelpCircle size={16} />} label="Support" />
+        <FooterLink icon={<User size={16} />} label="Account" />
       </div>
     </aside>
+  );
+};
+
+const FooterLink: React.FC<{ icon: React.ReactNode; label: string }> = ({ icon, label }) => (
+  <button className="w-full flex items-center gap-2.5 px-3 py-2 text-slate-400 hover:text-slate-700 text-sm rounded-md transition-colors">
+    {icon}
+    <span>{label}</span>
+  </button>
+);
+
+const SidebarProjectItem: React.FC<{
+  project: ProjectMeta;
+  isActive: boolean;
+  disabled: boolean;
+  onSelect: () => void;
+  onDelete: () => void;
+}> = ({ project, isActive, disabled, onSelect, onDelete }) => {
+  const [hovering, setHovering] = useState(false);
+
+  return (
+    <button
+      onClick={onSelect}
+      disabled={disabled && !isActive}
+      onMouseEnter={() => setHovering(true)}
+      onMouseLeave={() => setHovering(false)}
+      className={`w-full text-left px-3 py-2 rounded-lg transition-colors group relative ${
+        isActive
+          ? 'bg-white shadow-sm'
+          : disabled
+          ? 'opacity-40 cursor-not-allowed'
+          : 'hover:bg-white/60'
+      }`}
+    >
+      <div className="flex items-center justify-between mb-0.5">
+        <span className={`text-xs font-medium truncate ${isActive ? 'text-slate-900' : 'text-slate-700'}`}>
+          {project.title}
+        </span>
+        <span className="text-[10px] text-slate-400 flex-shrink-0 ml-2">
+          {formatRelativeTime(project.updatedAt)}
+        </span>
+      </div>
+      <div className="flex items-center gap-1.5">
+        <span className={`w-1.5 h-1.5 rounded-full ${
+          project.status === 'completed' ? 'bg-green-500' : 'bg-slate-400'
+        }`} />
+        <span className={`text-[10px] font-semibold uppercase tracking-tight ${
+          project.status === 'completed' ? 'text-green-600' : 'text-slate-400'
+        }`}>
+          {project.status === 'completed' ? 'Complete' : 'Draft'}
+        </span>
+      </div>
+      {hovering && !isActive && !disabled && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onDelete(); }}
+          className="absolute right-2 top-2 p-1 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded transition-colors"
+          title="Delete project"
+        >
+          <Trash2 size={12} />
+        </button>
+      )}
+    </button>
   );
 };
 

@@ -25,6 +25,8 @@ interface BriefReviewProps {
   onApproveAndGenerate: () => void;
   onBackToPlanning: () => void;
   isGenerating: boolean;
+  currentDocType?: string;
+  onHandoff?: (targetDocType: 'RFP' | 'RFI') => void;
 }
 
 const BriefReview: React.FC<BriefReviewProps> = ({
@@ -35,6 +37,8 @@ const BriefReview: React.FC<BriefReviewProps> = ({
   onApproveAndGenerate,
   onBackToPlanning,
   isGenerating,
+  currentDocType,
+  onHandoff,
 }) => {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [isEditingDesc, setIsEditingDesc] = useState(false);
@@ -51,28 +55,28 @@ const BriefReview: React.FC<BriefReviewProps> = ({
       : 'text-red-600 bg-red-50';
 
   return (
-    <div className="flex-1 overflow-y-auto">
-      <div className="max-w-3xl mx-auto px-6 py-8">
+    <div className="flex-1 overflow-y-auto bg-slate-50/50">
+      <div className="max-w-4xl mx-auto px-6 py-8">
         {/* Header */}
         <div className="mb-8">
           <div className="inline-flex items-center gap-2 px-3 py-1 bg-indigo-50 text-indigo-700 rounded-full text-xs font-medium mb-4">
             <Sparkles size={12} />
             Brief Generated
           </div>
-          <h2 className="text-2xl font-bold text-gray-900 mb-2">
+          <h2 className="text-2xl font-[Manrope] font-bold text-slate-900 mb-2">
             Review Your Project Brief
           </h2>
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-slate-500">
             Here&apos;s what I gathered from our conversation. Edit anything that needs updating,
             then approve to start document generation.
           </p>
         </div>
 
         {/* Brief Summary Card */}
-        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm mb-6 overflow-hidden">
+        <div className="bg-white rounded-2xl border border-slate-200/60 shadow-sm mb-8 overflow-hidden">
           {/* Project Title */}
-          <div className="px-6 py-4 border-b border-gray-100">
-            <label className="text-xs font-medium text-gray-400 uppercase tracking-wide">
+          <div className="px-6 py-4 border-b border-slate-100">
+            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
               Project Title
             </label>
             {isEditingTitle ? (
@@ -82,26 +86,26 @@ const BriefReview: React.FC<BriefReviewProps> = ({
                 onChange={(e) => onUpdateBrief({ projectTitle: e.target.value })}
                 onBlur={() => setIsEditingTitle(false)}
                 onKeyDown={(e) => e.key === 'Enter' && setIsEditingTitle(false)}
-                className="w-full mt-1 text-lg font-semibold text-gray-900 bg-transparent border-b-2 border-indigo-300 focus:outline-none"
+                className="w-full mt-1 text-lg font-[Manrope] font-bold text-slate-900 bg-transparent border-b-2 border-indigo-300 focus:outline-none"
               />
             ) : (
               <div
-                className="mt-1 text-lg font-semibold text-gray-900 cursor-pointer hover:text-indigo-700 flex items-center gap-2 group"
+                className="mt-1 text-lg font-[Manrope] font-bold text-slate-900 cursor-pointer hover:text-indigo-600 flex items-center gap-2 group transition-colors"
                 onClick={() => setIsEditingTitle(true)}
               >
                 {brief.projectTitle || 'Untitled Project'}
-                <Edit3 size={14} className="text-gray-300 group-hover:text-indigo-500" />
+                <Edit3 size={14} className="text-slate-300 group-hover:text-indigo-500" />
               </div>
             )}
           </div>
 
           {/* Type + Industry */}
-          <div className="px-6 py-3 flex items-center gap-4 border-b border-gray-100 bg-gray-50/50">
+          <div className="px-6 py-3 flex items-center gap-4 border-b border-slate-100 bg-slate-50/50">
             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-indigo-100 text-indigo-700 rounded-md text-xs font-semibold">
               {brief.docType}
             </span>
-            <span className="text-xs text-gray-500">
-              Industry: <strong className="text-gray-700">{brief.industry || 'General'}</strong>
+            <span className="text-xs text-slate-500">
+              Industry: <strong className="text-slate-700">{brief.industry || 'General'}</strong>
             </span>
             <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${confidenceColor}`}>
               {Math.round(brief.confidence.overall * 100)}% confidence
@@ -109,8 +113,8 @@ const BriefReview: React.FC<BriefReviewProps> = ({
           </div>
 
           {/* Description */}
-          <div className="px-6 py-4 border-b border-gray-100">
-            <label className="text-xs font-medium text-gray-400 uppercase tracking-wide">
+          <div className="px-6 py-4 border-b border-slate-100">
+            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
               Description
             </label>
             {isEditingDesc ? (
@@ -120,15 +124,15 @@ const BriefReview: React.FC<BriefReviewProps> = ({
                 onChange={(e) => onUpdateBrief({ projectDescription: e.target.value })}
                 onBlur={() => setIsEditingDesc(false)}
                 rows={3}
-                className="w-full mt-1 text-sm text-gray-700 bg-transparent border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                className="w-full mt-1 text-sm text-slate-700 bg-transparent border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-200"
               />
             ) : (
               <p
-                className="mt-1 text-sm text-gray-700 cursor-pointer hover:text-indigo-700 group"
+                className="mt-1 text-sm text-slate-700 cursor-pointer hover:text-indigo-700 group transition-colors"
                 onClick={() => setIsEditingDesc(true)}
               >
                 {brief.projectDescription || 'No description extracted.'}
-                <Edit3 size={12} className="inline ml-2 text-gray-300 group-hover:text-indigo-500" />
+                <Edit3 size={12} className="inline ml-2 text-slate-300 group-hover:text-indigo-500" />
               </p>
             )}
           </div>
@@ -136,7 +140,7 @@ const BriefReview: React.FC<BriefReviewProps> = ({
           {/* Expandable Details */}
           <button
             onClick={() => setShowDetails(!showDetails)}
-            className="w-full px-6 py-3 flex items-center justify-between text-xs font-medium text-gray-500 hover:bg-gray-50 transition-colors"
+            className="w-full px-6 py-3 flex items-center justify-between text-xs font-medium text-slate-500 hover:bg-slate-50 transition-colors"
           >
             <span>
               {brief.requirements.length} requirements, {brief.evaluationCriteria.length} criteria
@@ -149,10 +153,10 @@ const BriefReview: React.FC<BriefReviewProps> = ({
             <div className="px-6 pb-4 space-y-4">
               {brief.requirements.length > 0 && (
                 <div>
-                  <label className="text-xs font-medium text-gray-400">Requirements</label>
+                  <label className="text-xs font-medium text-slate-400">Requirements</label>
                   <ul className="mt-1 space-y-1">
                     {brief.requirements.map((r, i) => (
-                      <li key={i} className="text-sm text-gray-700 flex items-start gap-2">
+                      <li key={i} className="text-sm text-slate-700 flex items-start gap-2">
                         <span className="text-indigo-400 mt-0.5">•</span>
                         {r}
                       </li>
@@ -162,10 +166,10 @@ const BriefReview: React.FC<BriefReviewProps> = ({
               )}
               {brief.evaluationCriteria.length > 0 && (
                 <div>
-                  <label className="text-xs font-medium text-gray-400">Evaluation Criteria</label>
+                  <label className="text-xs font-medium text-slate-400">Evaluation Criteria</label>
                   <ul className="mt-1 space-y-1">
                     {brief.evaluationCriteria.map((c, i) => (
-                      <li key={i} className="text-sm text-gray-700 flex items-start gap-2">
+                      <li key={i} className="text-sm text-slate-700 flex items-start gap-2">
                         <span className="text-indigo-400 mt-0.5">•</span>
                         {c}
                       </li>
@@ -196,20 +200,20 @@ const BriefReview: React.FC<BriefReviewProps> = ({
           </div>
         )}
 
-        {/* Section Outline */}
+        {/* Document Sections — 2-column grid */}
         <div className="mb-8">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-base font-semibold text-gray-900">
+          <div className="flex items-center justify-between mb-5">
+            <h3 className="text-lg font-[Manrope] font-bold text-slate-900">
               Document Sections
             </h3>
-            <span className="text-xs text-gray-500">
+            <span className="text-xs text-slate-400 font-medium">
               {includedCount} of {totalCount} included
             </span>
           </div>
 
-          <div className="space-y-2">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {brief.suggestedSections.map((section, index) => (
-              <SectionRow
+              <SectionCard
                 key={index}
                 section={section}
                 index={index}
@@ -220,12 +224,39 @@ const BriefReview: React.FC<BriefReviewProps> = ({
           </div>
         </div>
 
+        {/* Brainstorm handoff */}
+        {currentDocType?.toLowerCase() === 'brainstorm' && onHandoff && (
+          <div className="mb-6 p-5 bg-amber-50 border border-amber-200 rounded-2xl">
+            <p className="text-sm text-amber-800 mb-3">
+              I think you have a solid handle on this. Want me to hand you off to one of my colleagues to build the actual document?
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => onHandoff('RFP')}
+                disabled={isGenerating}
+                className="flex-1 flex items-center justify-center gap-2 py-2.5 px-4 bg-indigo-600 text-white text-sm font-medium rounded-xl hover:bg-indigo-700 transition-colors disabled:opacity-40"
+              >
+                <ArrowRight size={14} />
+                Continue with Nova (RFP)
+              </button>
+              <button
+                onClick={() => onHandoff('RFI')}
+                disabled={isGenerating}
+                className="flex-1 flex items-center justify-center gap-2 py-2.5 px-4 bg-violet-600 text-white text-sm font-medium rounded-xl hover:bg-violet-700 transition-colors disabled:opacity-40"
+              >
+                <ArrowRight size={14} />
+                Continue with Zuno (RFI)
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Actions */}
         <div className="flex items-center justify-between pb-8">
           <button
             onClick={onBackToPlanning}
             disabled={isGenerating}
-            className="flex items-center gap-2 px-4 py-2.5 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-40"
+            className="flex items-center gap-2 px-4 py-2.5 text-sm text-slate-500 hover:text-slate-900 hover:bg-white rounded-xl transition-colors disabled:opacity-40"
           >
             <ArrowLeft size={16} />
             Back to chat
@@ -234,7 +265,7 @@ const BriefReview: React.FC<BriefReviewProps> = ({
           <button
             onClick={onApproveAndGenerate}
             disabled={isGenerating || includedCount === 0}
-            className="flex items-center gap-2 px-6 py-2.5 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm hover:shadow-md"
+            className="flex items-center gap-2 px-6 py-2.5 bg-indigo-600 text-white text-sm font-medium rounded-xl hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm hover:shadow-md"
           >
             {isGenerating ? (
               <>
@@ -255,21 +286,23 @@ const BriefReview: React.FC<BriefReviewProps> = ({
   );
 };
 
-const SectionRow: React.FC<{
+/** Section card — 2-column grid card matching screenshot design */
+const SectionCard: React.FC<{
   section: BriefSection;
   index: number;
   onToggle: () => void;
   onUpdate: (updates: Partial<BriefSection>) => void;
 }> = ({ section, index, onToggle, onUpdate }) => {
   const [isEditing, setIsEditing] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
   const [editTitle, setEditTitle] = useState(section.title);
   const [editDesc, setEditDesc] = useState(section.description);
 
   const included = section.included !== false;
   const priorityColor: Record<string, string> = {
-    high: 'bg-red-50 text-red-600',
-    medium: 'bg-yellow-50 text-yellow-600',
-    low: 'bg-gray-100 text-gray-500',
+    high: 'bg-sky-100 text-sky-700',
+    medium: 'bg-slate-100 text-slate-500',
+    low: 'bg-slate-50 text-slate-400',
   };
 
   const startEdit = (e: React.MouseEvent) => {
@@ -292,12 +325,12 @@ const SectionRow: React.FC<{
 
   if (isEditing) {
     return (
-      <div className="w-full px-4 py-3 rounded-xl border border-indigo-200 bg-indigo-50/30">
+      <div className="bg-white rounded-2xl border-2 border-indigo-200 p-5 shadow-sm">
         <input
           type="text"
           value={editTitle}
           onChange={(e) => setEditTitle(e.target.value)}
-          className="w-full text-sm font-medium text-gray-900 border border-indigo-300 rounded-lg px-3 py-1.5 mb-2 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+          className="w-full text-sm font-semibold text-slate-900 border border-indigo-300 rounded-lg px-3 py-2 mb-3 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
           placeholder="Section title"
           autoFocus
           onKeyDown={(e) => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') cancelEdit(); }}
@@ -305,22 +338,22 @@ const SectionRow: React.FC<{
         <textarea
           value={editDesc}
           onChange={(e) => setEditDesc(e.target.value)}
-          rows={2}
-          className="w-full text-xs text-gray-600 border border-gray-300 rounded-lg px-3 py-1.5 mb-2 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none resize-none"
-          placeholder="Section description"
+          rows={4}
+          className="w-full text-sm text-slate-600 border border-slate-200 rounded-lg px-3 py-2 mb-3 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none resize-y leading-relaxed"
+          placeholder="Describe what this section should cover — include specific details from your project"
           onKeyDown={(e) => { if (e.key === 'Escape') cancelEdit(); }}
         />
         <div className="flex items-center gap-2">
           <button
             onClick={saveEdit}
-            className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 transition-colors"
+            className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors"
           >
             <Check size={12} />
             Save
           </button>
           <button
             onClick={cancelEdit}
-            className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded-md hover:bg-gray-50 transition-colors"
+            className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
           >
             <X size={12} />
             Cancel
@@ -332,39 +365,91 @@ const SectionRow: React.FC<{
 
   return (
     <div
-      className={`w-full flex items-start gap-3 px-4 py-3 rounded-xl border text-left transition-all group ${
+      className={`relative bg-white rounded-2xl border p-5 transition-all group ${
         included
-          ? 'border-gray-200 bg-white hover:border-indigo-200'
-          : 'border-gray-100 bg-gray-50 opacity-60 hover:opacity-80'
+          ? 'border-slate-200/60 shadow-sm hover:shadow-md hover:border-indigo-200'
+          : 'border-slate-100 opacity-50 hover:opacity-70'
       }`}
     >
-      <button onClick={onToggle} className="mt-0.5 flex-shrink-0">
+      {/* Checkbox — top right */}
+      <button
+        onClick={onToggle}
+        className="absolute top-4 right-4 flex-shrink-0"
+        title={included ? 'Exclude section' : 'Include section'}
+      >
         {included ? (
           <CheckSquare size={18} className="text-indigo-600" />
         ) : (
-          <Square size={18} className="text-gray-300" />
+          <Square size={18} className="text-slate-300" />
         )}
       </button>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <span className={`text-sm font-medium ${included ? 'text-gray-900' : 'text-gray-500 line-through'}`}>
-            {section.title}
+
+      {/* Title + badges */}
+      <h4 className={`text-sm font-semibold pr-8 mb-2 ${included ? 'text-slate-900' : 'text-slate-500 line-through'}`}>
+        {section.title}
+      </h4>
+
+      <div className="flex items-center gap-1.5 mb-3 flex-wrap">
+        <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${priorityColor[section.priority] || priorityColor.medium}`}>
+          {section.priority}
+        </span>
+        {section.responseType === 'vendor_response' ? (
+          <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-indigo-50 text-indigo-600">
+            vendor response
           </span>
-          <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${priorityColor[section.priority] || priorityColor.medium}`}>
-            {section.priority}
+        ) : (
+          <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-slate-50 text-slate-400">
+            context
           </span>
-        </div>
-        <p className={`text-xs mt-0.5 leading-relaxed ${included ? 'text-gray-500' : 'text-gray-400'}`}>
-          {section.description}
-        </p>
+        )}
       </div>
-      <button
-        onClick={startEdit}
-        className="flex-shrink-0 p-1.5 text-gray-300 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
-        title="Edit section"
-      >
-        <PenLine size={14} />
-      </button>
+
+      {/* Description — collapsed/expanded */}
+      {!isExpanded ? (
+        <p className={`text-sm leading-relaxed mb-2 ${included ? 'text-slate-500' : 'text-slate-400'}`}>
+          {section.description.split(/\.\s/)[0]}.
+        </p>
+      ) : (
+        <div className="mb-2">
+          <p
+            onClick={startEdit}
+            className={`text-sm leading-relaxed cursor-pointer hover:bg-slate-50 rounded px-1 -mx-1 py-0.5 transition-colors ${included ? 'text-slate-600' : 'text-slate-400'}`}
+            title="Click to edit"
+          >
+            {section.description}
+          </p>
+        </div>
+      )}
+
+      {/* See details / collapse link */}
+      <div className="flex items-center gap-3">
+        {!isExpanded ? (
+          <button
+            onClick={() => setIsExpanded(true)}
+            className="text-xs text-indigo-500 hover:text-indigo-700 font-medium transition-colors flex items-center gap-0.5"
+          >
+            See details & edit
+            <ChevronDown size={12} />
+          </button>
+        ) : (
+          <>
+            <button
+              onClick={startEdit}
+              className="text-xs text-indigo-500 hover:text-indigo-700 font-medium transition-colors flex items-center gap-0.5"
+            >
+              <PenLine size={11} />
+              Edit
+            </button>
+            <button
+              onClick={() => setIsExpanded(false)}
+              className="text-xs text-slate-400 hover:text-slate-600 font-medium transition-colors flex items-center gap-0.5"
+            >
+              Collapse
+              <ChevronUp size={12} />
+            </button>
+          </>
+        )}
+      </div>
     </div>
   );
 };

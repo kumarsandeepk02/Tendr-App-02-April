@@ -30,6 +30,28 @@ code {
   background: #9ca3af;
 }
 
+/* Markdown tables */
+.prose table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  margin: 0.75rem 0;
+}
+.prose th,
+.prose td {
+  border: 1px solid #e5e7eb;
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+}
+.prose th {
+  background: #f9fafb;
+  font-weight: 600;
+  color: #374151;
+}
+.prose tr:nth-child(even) {
+  background: #f9fafb;
+}
+
 /* Animate-in utility */
 .animate-in {
   animation: slideIn 0.3s ease-out;

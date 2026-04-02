@@ -1,4 +1,5 @@
 const { agentCall } = require('../claudeService');
+const { repairAndParse } = require('../security/jsonRepair');
 
 const ANALYZER_SYSTEM_PROMPT = `You are a procurement document analyst. Your job is to cross-reference uploaded reference documents with the generated RFP/RFI sections and identify gaps, conflicts, and enrichment opportunities.
 
@@ -73,7 +74,7 @@ async function analyzeDocuments({ documents, generatedSections, docType, answers
   userPrompt += `Provide your cross-reference analysis as JSON.`;
 
   try {
-    const response = await agentCall(ANALYZER_SYSTEM_PROMPT, userPrompt, { maxTokens: 2000, temperature: 0.2, model });
+    const response = await agentCall(ANALYZER_SYSTEM_PROMPT, userPrompt, { maxTokens: 4000, temperature: 0.2, model });
 
     // Parse JSON — handle possible markdown fences
     let jsonStr = response;
@@ -82,12 +83,8 @@ async function analyzeDocuments({ documents, generatedSections, docType, answers
       jsonStr = fenceMatch[1].trim();
     }
 
-    const objMatch = jsonStr.match(/\{[\s\S]*\}/);
-    if (objMatch) {
-      jsonStr = objMatch[0];
-    }
-
-    const parsed = JSON.parse(jsonStr);
+    const parsed = repairAndParse(jsonStr);
+    if (!parsed) throw new Error('Could not parse document analysis JSON');
 
     return {
       gaps: Array.isArray(parsed.gaps) ? parsed.gaps.slice(0, 5).map(g => ({

@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { DocumentSection } from '../types';
-import { Pencil, Trash2, GripVertical, Check, X, RefreshCw, Target, Scissors, MessageSquare, Loader2, ChevronDown, Undo2 } from 'lucide-react';
+import { Pencil, Trash2, GripVertical, Check, X, RefreshCw, Target, Scissors, MessageSquare, Loader2, ChevronDown, Undo2, Sparkles } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import CopilotBar from './CopilotBar';
 
 interface SectionCardProps {
@@ -134,33 +135,34 @@ const SectionCard: React.FC<SectionCardProps> = ({
       )}
 
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-100">
-        <div className="flex items-center gap-2">
-          <span
-            {...(dragHandleProps || {})}
-            className="cursor-grab text-gray-400 hover:text-gray-600"
-          >
-            <GripVertical size={16} />
-          </span>
-          <h3 className="font-semibold text-sm text-gray-900">
-            {section.title}
-          </h3>
+      <div className="px-4 py-3 border-b border-slate-100 bg-slate-50/50">
+        <div className="flex items-center justify-between mb-1">
+          <div className="flex items-center gap-2">
+            <span
+              {...(dragHandleProps || {})}
+              className="cursor-grab text-slate-300 hover:text-slate-500"
+            >
+              <GripVertical size={16} />
+            </span>
+            <h3 className="font-semibold text-sm text-slate-900">
+              {section.title}
+            </h3>
+          </div>
         </div>
-        <div className="flex items-center gap-1">
-          {!isEditing && !isDisabled && (
-            <>
-              {/* AI Action Menu */}
-              {onRegenerate && (
-                <div className="relative" ref={menuRef}>
-                  <button
-                    onClick={() => setShowAIMenu(!showAIMenu)}
-                    className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-indigo-600 hover:bg-indigo-50 rounded-md transition-colors"
-                    title="AI actions"
-                  >
-                    <RefreshCw size={12} />
-                    AI
-                    <ChevronDown size={10} />
-                  </button>
+        {!isEditing && !isDisabled && (
+          <div className="flex items-center gap-2 ml-6 mt-1.5">
+            {/* AI Action Menu */}
+            {onRegenerate && (
+              <div className="relative" ref={menuRef}>
+                <button
+                  onClick={() => setShowAIMenu(!showAIMenu)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors"
+                  title="AI actions"
+                >
+                  <Sparkles size={13} />
+                  AI Rewrite
+                  <ChevronDown size={11} />
+                </button>
                   {showAIMenu && (
                     <div className="absolute right-0 top-full mt-1 w-56 bg-white border border-gray-200 rounded-lg shadow-lg z-20 py-1">
                       <button
@@ -248,21 +250,22 @@ const SectionCard: React.FC<SectionCardProps> = ({
                   setEditContent(section.content);
                   setIsEditing(true);
                 }}
-                className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 hover:border-slate-300 rounded-lg transition-colors"
                 title="Edit section"
               >
-                <Pencil size={14} />
+                <Pencil size={13} />
+                Edit
               </button>
               <button
                 onClick={() => onRemove(section.id)}
-                className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-400 bg-white border border-slate-200 hover:text-red-600 hover:bg-red-50 hover:border-red-200 rounded-lg transition-colors"
                 title="Delete section"
               >
-                <Trash2 size={14} />
+                <Trash2 size={13} />
+                Delete
               </button>
-            </>
-          )}
-        </div>
+          </div>
+        )}
       </div>
 
       {/* Content */}
@@ -304,7 +307,7 @@ const SectionCard: React.FC<SectionCardProps> = ({
           </div>
         ) : (
           <div className={`prose prose-sm max-w-none text-gray-600 ${showCursor ? 'streaming-cursor' : ''}`}>
-            <ReactMarkdown>{section.content}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{section.content}</ReactMarkdown>
           </div>
         )}
       </div>

@@ -1,4 +1,5 @@
 const { agentCall } = require('../claudeService');
+const { repairAndParse } = require('../security/jsonRepair');
 
 const INTEL_SYSTEM_PROMPT = `You are a procurement market analyst with deep knowledge of industry benchmarks, standards, and risk factors. Based on the project context and industry, provide competitive intelligence that will make the procurement document more rigorous and well-informed.
 
@@ -66,7 +67,7 @@ async function generateCompetitiveIntel({ docType, answers, industryProfile, mod
   userPrompt += `Provide competitive intelligence as JSON. Focus on actionable, specific insights that will make this ${docType} more rigorous.`;
 
   try {
-    const response = await agentCall(INTEL_SYSTEM_PROMPT, userPrompt, { maxTokens: 2000, temperature: 0.3, model });
+    const response = await agentCall(INTEL_SYSTEM_PROMPT, userPrompt, { maxTokens: 4000, temperature: 0.3, model });
 
     // Parse JSON — handle possible markdown fences
     let jsonStr = response;
@@ -75,12 +76,8 @@ async function generateCompetitiveIntel({ docType, answers, industryProfile, mod
       jsonStr = fenceMatch[1].trim();
     }
 
-    const objMatch = jsonStr.match(/\{[\s\S]*\}/);
-    if (objMatch) {
-      jsonStr = objMatch[0];
-    }
-
-    const parsed = JSON.parse(jsonStr);
+    const parsed = repairAndParse(jsonStr);
+    if (!parsed) throw new Error('Could not parse competitive intel JSON');
 
     return {
       industryBenchmarks: Array.isArray(parsed.industryBenchmarks) ? parsed.industryBenchmarks.slice(0, 4).map(b => ({

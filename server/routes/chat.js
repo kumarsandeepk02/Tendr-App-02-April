@@ -6,6 +6,8 @@ const { regenerateSection } = require('../services/agents/sectionWriter');
 const { analyzeDocuments } = require('../services/agents/documentAnalyzer');
 const { generateCompetitiveIntel } = require('../services/agents/competitiveIntelAgent');
 const { planningChat, generateBrief, generateNarrations } = require('../services/agents/planningAgent');
+const { getAgent } = require('../services/agents/orchestrators/agentDefinitions');
+const { reviewReadiness } = require('../services/agents/readinessReviewer');
 
 // GET available models
 router.get('/models', (req, res) => {
@@ -126,8 +128,11 @@ router.post('/pipeline', async (req, res) => {
           res.write(`data: ${JSON.stringify({ type: 'done', content: fullDocument })}\n\n`);
         },
         onReview: (reviewResult) => {
-          if (reviewResult && !res.writableEnded) {
-            res.write(`data: ${JSON.stringify({ type: 'review', content: reviewResult })}\n\n`);
+          if (!res.writableEnded) {
+            if (reviewResult) {
+              res.write(`data: ${JSON.stringify({ type: 'review', content: reviewResult })}\n\n`);
+            }
+            res.write(`data: ${JSON.stringify({ type: 'stage', stage: 'complete' })}\n\n`);
           }
           tryClose();
         },
@@ -255,15 +260,16 @@ router.post('/competitive-intel', async (req, res) => {
 // ===================== V2 Endpoints =====================
 
 // V2: Planning Agent chat — freeform conversation to gather project context
+// Accepts docType to select the right agent personality (Nova/Zuno/Zia)
 router.post('/v2/planning', async (req, res) => {
   try {
-    const { messages, fileContext, model } = req.body;
+    const { messages, fileContext, model, docType } = req.body;
 
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
       return res.status(400).json({ error: 'Messages array is required' });
     }
 
-    const content = await planningChat({ messages, fileContext, model });
+    const content = await planningChat({ messages, fileContext, model, docType });
     res.json({ content });
   } catch (error) {
     console.error('V2 Planning chat error:', error.message);
@@ -289,6 +295,29 @@ router.post('/v2/brief', async (req, res) => {
     res.status(500).json({
       error: 'Failed to generate brief. Please try again.',
     });
+  }
+});
+
+// V2: Readiness review — analyze brief for gaps before generation
+router.post('/v2/readiness', async (req, res) => {
+  try {
+    const { brief, docType, model } = req.body;
+
+    if (!brief) {
+      return res.status(400).json({ error: 'brief is required' });
+    }
+
+    const result = await reviewReadiness({ brief, docType: docType || brief.docType, model });
+
+    if (!result) {
+      // Agent config says skip readiness (e.g., brainstorm)
+      return res.json({ status: 'green', issues: [], summary: 'Ready to generate.', skipped: true });
+    }
+
+    res.json(result);
+  } catch (error) {
+    console.error('V2 Readiness review error:', error.message);
+    res.status(500).json({ error: 'Readiness review failed.' });
   }
 });
 
@@ -321,10 +350,13 @@ router.post('/v2/pipeline', async (req, res) => {
     res.setHeader('X-Accel-Buffering', 'no');
     res.flushHeaders();
 
+    // Get the right agent for narration personality
+    const agent = getAgent(docType);
+
     // Generate contextual narrations upfront (non-blocking — use defaults on failure)
     let contextualNarrations = {};
     try {
-      res.write(`data: ${JSON.stringify({ type: 'narration', content: '📋 Planning complete. Handing off to the Writing Team...', agent: 'research', narrationStyle: 'handover' })}\n\n`);
+      res.write(`data: ${JSON.stringify({ type: 'narration', content: agent.narration.handoffToWriter, agent: agent.name.toLowerCase(), narrationStyle: 'handover' })}\n\n`);
       contextualNarrations = await generateNarrations({ brief, messages: planningMessages || [], model });
     } catch (err) {
       console.warn('Contextual narration generation failed, using defaults:', err.message);
@@ -362,20 +394,26 @@ router.post('/v2/pipeline', async (req, res) => {
           res.write(`data: ${JSON.stringify({ type: 'narration', content: `✓ Completed **${title}**`, agent: 'writer' })}\n\n`);
         },
         onDone: (fullDocument) => {
-          res.write(`data: ${JSON.stringify({ type: 'narration', content: 'All sections written. Handing off to Quality Reviewer...', agent: 'writer', narrationStyle: 'handover' })}\n\n`);
+          res.write(`data: ${JSON.stringify({ type: 'narration', content: agent.narration.reviewHandoff || 'All sections written. Running quality review...', agent: agent.name.toLowerCase(), narrationStyle: 'handover' })}\n\n`);
           res.write(`data: ${JSON.stringify({ type: 'done', content: fullDocument })}\n\n`);
         },
         onReview: (reviewResult) => {
-          if (reviewResult && !res.writableEnded) {
-            res.write(`data: ${JSON.stringify({ type: 'narration', content: `✅ Quality review complete — score: ${reviewResult.score}/100`, agent: 'reviewer' })}\n\n`);
-            res.write(`data: ${JSON.stringify({ type: 'review', content: reviewResult })}\n\n`);
+          if (!res.writableEnded) {
+            if (reviewResult) {
+              const reviewMsg = agent.narration.reviewDone
+                ? agent.narration.reviewDone(reviewResult.score)
+                : `Quality review complete — score: ${reviewResult.score}/100`;
+              res.write(`data: ${JSON.stringify({ type: 'narration', content: reviewMsg, agent: agent.name.toLowerCase() })}\n\n`);
+              res.write(`data: ${JSON.stringify({ type: 'review', content: reviewResult })}\n\n`);
+            }
+            // Always send 'complete' stage — even if review failed
             res.write(`data: ${JSON.stringify({ type: 'stage', stage: 'complete' })}\n\n`);
           }
           tryClose();
         },
         onCompetitiveIntel: (intelResult) => {
           if (intelResult && !res.writableEnded) {
-            res.write(`data: ${JSON.stringify({ type: 'narration', content: '🔍 Competitive intelligence analysis complete', agent: 'research' })}\n\n`);
+            res.write(`data: ${JSON.stringify({ type: 'narration', content: agent.narration.intelDone || 'Competitive intelligence analysis complete', agent: agent.name.toLowerCase() })}\n\n`);
             res.write(`data: ${JSON.stringify({ type: 'competitive_intel', content: intelResult })}\n\n`);
           }
           tryClose();

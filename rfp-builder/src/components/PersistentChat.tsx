@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { MessageSquare, X, Send, Loader2, Bot, User, Minimize2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { UnifiedFlowPhase } from '../types';
 
 interface PersistentMessage {
@@ -234,7 +235,7 @@ const PersistentChat: React.FC<PersistentChatProps> = ({
                     >
                       {msg.role === 'assistant' ? (
                         <div className="prose prose-sm max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
-                          <ReactMarkdown>{msg.content}</ReactMarkdown>
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
                         </div>
                       ) : (
                         <p>{msg.content}</p>

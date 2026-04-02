@@ -13,6 +13,7 @@ if (!globalThis.FormData) {
 }
 
 const Anthropic = require('@anthropic-ai/sdk');
+const { anchorSystemPrompt, validateOutput, logInjectionAttempt } = require('./security/promptDefense');
 
 const client = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
@@ -158,12 +159,20 @@ async function agentCall(systemPrompt, userPrompt, { maxTokens = 2000, temperatu
     model: resolveModel(model),
     max_tokens: maxTokens,
     temperature,
-    system: systemPrompt,
+    system: anchorSystemPrompt(systemPrompt),
     messages,
   });
 
   const textBlock = response.content.find((block) => block.type === 'text');
-  return textBlock ? textBlock.text : '';
+  const output = textBlock ? textBlock.text : '';
+
+  // Layer 4: Validate output
+  const validation = validateOutput(output);
+  if (!validation.isClean) {
+    logInjectionAttempt({ layer: 'output_validation', flags: validation.flags });
+  }
+
+  return output;
 }
 
 /**
@@ -175,7 +184,7 @@ async function agentStream(systemPrompt, userPrompt, onText, onDone, { maxTokens
     model: resolveModel(model),
     max_tokens: maxTokens,
     temperature,
-    system: systemPrompt,
+    system: anchorSystemPrompt(systemPrompt),
     messages: [{ role: 'user', content: userPrompt }],
   });
 

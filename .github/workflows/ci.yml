@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  lint-and-typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install server dependencies
+        run: npm ci
+        working-directory: server
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: rfp-builder
+
+      - name: TypeScript type-check (frontend)
+        run: npx tsc --noEmit
+        working-directory: rfp-builder
+
+      - name: Build frontend
+        run: npm run build
+        working-directory: rfp-builder
+        env:
+          REACT_APP_API_URL: https://api.tendr.app
+          REACT_APP_WORKOS_CLIENT_ID: placeholder
+          CI: true

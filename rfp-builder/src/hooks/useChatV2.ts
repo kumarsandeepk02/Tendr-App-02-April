@@ -1,5 +1,4 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import axios from 'axios';
 import {
   ChatMessage,
   ChatRole,
@@ -13,9 +12,9 @@ import {
   CompetitiveIntelligence,
   ModelOption,
   GenerationStage,
+  ReadinessReview,
 } from '../types';
-
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
+import { api, authFetch, API_URL } from '../utils/api';
 
 function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).substr(2, 9);
@@ -38,17 +37,17 @@ interface UseChatV2Options {
 }
 
 const WELCOME_MESSAGES: Record<string, string> = {
-  default: `Hi, I'm Priya, your RFP analyst. Let's brainstorm what you need for this procurement document. Once I have the details, I'll hand everything over to our writing team to generate a polished draft.
+  default: `Hey, I'm Zia. I'm here to help you think through what you need before we jump into building anything formal. No pressure, no structure yet — just a good conversation.
 
-Think of this as your first prep meeting — tell me about your project in your own words, and I'll ask the right follow-up questions. **What are you working on?**`,
+Tell me what's on your mind. What problem are you trying to solve?`,
 
-  RFP: `Hi, I'm Priya, your RFP analyst. Let's build out your **Request for Proposal**. Tell me about the project — what are you procuring, who's it for, and what does success look like?
+  RFP: `Hey, I'm Nova — your RFP co-author. Let's build out your **Request for Proposal** together. Tell me about the project — what are you procuring, who's it for, and what does a great outcome look like?
 
-I'll ask follow-up questions to make sure we cover everything before handing off to the writing team.`,
+I'll push you to be specific, flag anything vague, and make sure this thing is airtight before it goes out.`,
 
-  RFI: `Hi, I'm Priya, your RFP analyst. Let's put together your **Request for Information**. Tell me about what you're exploring — what market or capability are you trying to understand?
+  RFI: `Hey, I'm Zuno — your market research partner. Let's put together an **RFI** that actually gets you useful answers from vendors.
 
-I'll help you frame the right questions before we generate the document.`,
+Tell me what you're trying to learn. What category or capability are you exploring, and what's driving this?`,
 };
 
 export function useChatV2(options?: UseChatV2Options) {
@@ -58,9 +57,12 @@ export function useChatV2(options?: UseChatV2Options) {
   const [isGenerating, setIsGenerating] = useState(false);
   const [brief, setBrief] = useState<BriefData | null>(null);
   const [isBriefLoading, setIsBriefLoading] = useState(false);
+  const [readinessReview, setReadinessReview] = useState<ReadinessReview | null>(null);
+  const [isReadinessLoading, setIsReadinessLoading] = useState(false);
   const [narrations, setNarrations] = useState<NarrationMessage[]>([]);
   const [uploadedDocuments, setUploadedDocuments] = useState<UploadedDocument[]>([]);
   const [uploadedFileText, setUploadedFileText] = useState<string>('');
+  const [currentDocType, setCurrentDocType] = useState<string | undefined>(undefined);
   const [availableModels, setAvailableModels] = useState<ModelOption[]>([]);
   const [selectedModel, setSelectedModel] = useState<string>(() => {
     return localStorage.getItem('rfp_selected_model') || '';
@@ -72,8 +74,8 @@ export function useChatV2(options?: UseChatV2Options) {
 
   // Fetch available models on mount
   useEffect(() => {
-    axios
-      .get(`${API_URL}/api/chat/models`)
+    api
+      .get('/api/chat/models')
       .then((res) => {
         const data = res.data;
         setAvailableModels(data.models || []);
@@ -134,6 +136,7 @@ export function useChatV2(options?: UseChatV2Options) {
     (docType?: 'RFP' | 'RFI') => {
       setPhase('planning');
       setMessages([]);
+      setCurrentDocType(docType || 'brainstorm');
 
       const welcomeContent = docType
         ? WELCOME_MESSAGES[docType]
@@ -161,10 +164,11 @@ export function useChatV2(options?: UseChatV2Options) {
           .filter((m) => !m.isLoading && !m.isError)
           .map((m) => ({ role: m.role, content: m.content }));
 
-        const res = await axios.post(`${API_URL}/api/chat/v2/planning`, {
+        const res = await api.post('/api/chat/v2/planning', {
           messages: apiMessages,
           fileContext: uploadedFileText || undefined,
           model: selectedModel || undefined,
+          docType: currentDocType || undefined,
         });
 
         const assistantContent = res.data.content;
@@ -176,7 +180,7 @@ export function useChatV2(options?: UseChatV2Options) {
         setIsTyping(false);
       }
     },
-    [messages, addMessage, uploadedFileText, selectedModel]
+    [messages, addMessage, uploadedFileText, selectedModel, currentDocType]
   );
 
   // Handle file upload during planning
@@ -223,7 +227,7 @@ export function useChatV2(options?: UseChatV2Options) {
         .filter((m) => !m.isLoading && !m.isError)
         .map((m) => ({ role: m.role, content: m.content }));
 
-      const res = await axios.post(`${API_URL}/api/chat/v2/brief`, {
+      const res = await api.post('/api/chat/v2/brief', {
         messages: apiMessages,
         fileContext: uploadedFileText || undefined,
         model: selectedModel || undefined,
@@ -339,8 +343,8 @@ export function useChatV2(options?: UseChatV2Options) {
     }
   }, [addNarration]);
 
-  // Approve brief and start generation
-  const approveAndGenerate = useCallback(async () => {
+  // Actually start generation (called from readiness screen or directly for brainstorm)
+  const proceedToGenerate = useCallback(async () => {
     if (!brief) return;
 
     setIsGenerating(true);
@@ -353,7 +357,7 @@ export function useChatV2(options?: UseChatV2Options) {
 
     const confirmedSections = brief.suggestedSections
       .filter((s) => s.included !== false)
-      .map((s) => ({ title: s.title, description: s.description }));
+      .map((s) => ({ title: s.title, description: s.description, responseType: s.responseType || 'narrative' }));
 
     // Build planning messages for contextual narration generation
     const planningMessages = messages
@@ -361,7 +365,7 @@ export function useChatV2(options?: UseChatV2Options) {
       .map((m) => ({ role: m.role, content: m.content }));
 
     try {
-      const response = await fetch(`${API_URL}/api/chat/v2/pipeline`, {
+      const response = await authFetch(`${API_URL}/api/chat/v2/pipeline`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -380,10 +384,13 @@ export function useChatV2(options?: UseChatV2Options) {
 
       await readSSEStream(response);
 
+      // Ensure stage reaches 'complete' immediately after stream ends
+      optionsRef.current?.onStageChange?.('complete');
+
       // Backup fetch for competitive intel
       if (!pipelineResultsRef.current.competitiveIntel) {
         try {
-          const intelRes = await fetch(`${API_URL}/api/chat/competitive-intel`, {
+          const intelRes = await authFetch(`${API_URL}/api/chat/competitive-intel`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -421,11 +428,80 @@ export function useChatV2(options?: UseChatV2Options) {
     }
   }, [brief, messages, uploadedFileText, uploadedDocuments, selectedModel, readSSEStream, addNarration]);
 
+  // Approve brief → run readiness review (for RFP/RFI), then show readiness screen
+  const approveAndGenerate = useCallback(async () => {
+    if (!brief) return;
+
+    const docType = currentDocType || brief.docType || 'rfp';
+    const isBrainstorm = docType.toLowerCase() === 'brainstorm';
+
+    if (isBrainstorm) {
+      // Brainstorm skips readiness — go straight to generation
+      proceedToGenerate();
+      return;
+    }
+
+    // Fetch readiness review
+    setIsReadinessLoading(true);
+    setPhase('readiness');
+
+    try {
+      const res = await api.post('/api/chat/v2/readiness', {
+        brief,
+        docType,
+        model: selectedModel || undefined,
+      });
+      setReadinessReview(res.data);
+    } catch (err) {
+      // If readiness fails, show green pass so user is never blocked
+      setReadinessReview({
+        status: 'green',
+        issues: [],
+        summary: 'Readiness check could not be completed. You can proceed with generation.',
+      });
+    } finally {
+      setIsReadinessLoading(false);
+    }
+  }, [brief, currentDocType, selectedModel, proceedToGenerate]);
+
+  // Go back from readiness to brief
+  const backToBrief = useCallback(() => {
+    setPhase('brief');
+    setReadinessReview(null);
+  }, []);
+
   // Go back to planning from brief
   const backToPlanning = useCallback(() => {
     setPhase('planning');
     setBrief(null);
   }, []);
+
+  // Warm handoff from Zia (brainstorm) to Nova (RFP) or Zuno (RFI)
+  const handleHandoff = useCallback((targetDocType: 'RFP' | 'RFI') => {
+    const agentNames: Record<string, string> = { RFP: 'Nova', RFI: 'Zuno' };
+    const agentName = agentNames[targetDocType];
+
+    // Add a warm handoff message from Zia
+    const handoffMessages: Record<string, string> = {
+      RFP: `I think you're ready for the next step. Let me hand this over to Nova — she's our RFP specialist and she's brilliant at turning ideas into structured documents. She'll have all the context from our conversation, so you can pick up right where we left off.`,
+      RFI: `Sounds like you want to explore the market a bit more before committing. Let me bring in Zuno — he's our RFI expert and he'll help you ask the right questions to get real answers from vendors. He'll have everything from our conversation.`,
+    };
+
+    addMessage('assistant', handoffMessages[targetDocType]);
+
+    // Switch the doc type and update brief
+    setCurrentDocType(targetDocType);
+    setBrief((prev) => prev ? { ...prev, docType: targetDocType as any } : prev);
+
+    // Add a welcome message from the new agent
+    setTimeout(() => {
+      const welcomeMessages: Record<string, string> = {
+        RFP: `Hey, Nova here. Zia caught me up on everything — nice groundwork. I've got your brief and I'm ready to turn this into a structured RFP. Let me take a look at what we're working with and we'll get this generated.`,
+        RFI: `Hey, Zuno here. Zia filled me in on the context — good stuff. I've got your brief and I'm going to shape this into an RFI that gets you real answers from the market. Let's review what we have and then generate.`,
+      };
+      addMessage('assistant', welcomeMessages[targetDocType]);
+    }, 500);
+  }, [addMessage]);
 
   // Section regeneration (same as V1)
   const regenerateSection = useCallback(
@@ -434,7 +510,7 @@ export function useChatV2(options?: UseChatV2Options) {
       optionsRef.current?.onSectionRegenerationStart?.(sectionId);
 
       try {
-        const response = await fetch(`${API_URL}/api/chat/regenerate-section`, {
+        const response = await authFetch(`${API_URL}/api/chat/regenerate-section`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -503,7 +579,7 @@ export function useChatV2(options?: UseChatV2Options) {
       const docType = brief?.docType || 'RFP';
 
       try {
-        const response = await fetch(`${API_URL}/api/chat/regenerate-section`, {
+        const response = await authFetch(`${API_URL}/api/chat/regenerate-section`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -594,10 +670,12 @@ export function useChatV2(options?: UseChatV2Options) {
     async (content: string): Promise<string> => {
       const docType = brief?.docType || 'RFP';
       const projectTitle = brief?.projectTitle || 'Untitled';
-      const systemPrompt = `You are Priya, an expert procurement document assistant. The user is working on a ${docType} document titled "${projectTitle}". Help them with any questions or editing instructions. Be concise and helpful.`;
+      const agentNames: Record<string, string> = { RFP: 'Nova', RFI: 'Zuno', brainstorm: 'Zia' };
+      const agentName = agentNames[docType] || agentNames[currentDocType || ''] || 'Nova';
+      const systemPrompt = `You are ${agentName}, an expert procurement document assistant. The user is working on a ${docType} document titled "${projectTitle}". Help them with any questions or editing instructions. Be conversational — you are a coworker, not a tool. Be concise and helpful.`;
 
       try {
-        const res = await axios.post(`${API_URL}/api/chat`, {
+        const res = await api.post('/api/chat', {
           messages: [{ role: 'user', content }],
           systemPrompt,
           model: selectedModel || undefined,
@@ -619,6 +697,7 @@ export function useChatV2(options?: UseChatV2Options) {
     setNarrations([]);
     setUploadedDocuments([]);
     setUploadedFileText('');
+    setCurrentDocType(undefined);
     setIsGenerating(false);
     setIsBriefLoading(false);
   }, []);
@@ -652,6 +731,7 @@ export function useChatV2(options?: UseChatV2Options) {
     narrations,
     uploadedDocuments,
     uploadedFileText,
+    currentDocType,
     // Actions
     startPlanning,
     sendMessage,
@@ -662,7 +742,12 @@ export function useChatV2(options?: UseChatV2Options) {
     updateBriefSection,
     toggleBriefSection,
     approveAndGenerate,
+    proceedToGenerate,
+    readinessReview,
+    isReadinessLoading,
+    backToBrief,
     backToPlanning,
+    handleHandoff,
     resetChat,
     restoreChat,
     // Freeform / persistent chat

@@ -3,7 +3,7 @@ import { ChatMessage, UnifiedFlowPhase, GuidedStep, OutlineSection, SectionProgr
 import MessageBubble from './MessageBubble';
 import TextareaAutosize from 'react-textarea-autosize';
 import { useDropzone } from 'react-dropzone';
-import axios from 'axios';
+import { api } from '../utils/api';
 import {
   Send,
   Paperclip,
@@ -88,7 +88,7 @@ const InlineUploadZone: React.FC<{
         const formData = new FormData();
         formData.append('file', file);
 
-        const res = await axios.post(`${API_URL}/api/upload`, formData, {
+        const res = await api.post('/api/upload', formData, {
           headers: { 'Content-Type': 'multipart/form-data' },
         });
 
@@ -180,7 +180,7 @@ const ScopeUploadZone: React.FC<{
         const formData = new FormData();
         formData.append('file', file);
 
-        const res = await axios.post(`${API_URL}/api/upload`, formData, {
+        const res = await api.post('/api/upload', formData, {
           headers: { 'Content-Type': 'multipart/form-data' },
         });
 

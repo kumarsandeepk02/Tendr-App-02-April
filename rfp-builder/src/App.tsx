@@ -11,6 +11,7 @@ import LandingPage from './components/v2/LandingPage';
 import PlanningChat from './components/v2/PlanningChat';
 import BriefReview from './components/v2/BriefReview';
 import GenerationNarrator from './components/v2/GenerationNarrator';
+import ReadinessReviewComponent from './components/v2/ReadinessReview';
 import PersistentChat from './components/PersistentChat';
 import './index.css';
 
@@ -126,7 +127,13 @@ function App() {
     updateBriefSection,
     toggleBriefSection,
     approveAndGenerate,
+    proceedToGenerate,
+    readinessReview,
+    isReadinessLoading,
+    backToBrief,
     backToPlanning,
+    currentDocType,
+    handleHandoff,
     resetChat,
     restoreChat,
     // Freeform / persistent chat
@@ -150,6 +157,7 @@ function App() {
         landing: 'questions',
         planning: 'questions',
         brief: 'outline_review',
+        readiness: 'outline_review',
         generating: 'generating',
         done: 'done',
       };
@@ -262,8 +270,24 @@ function App() {
             onApproveAndGenerate={approveAndGenerate}
             onBackToPlanning={backToPlanning}
             isGenerating={isGenerating}
+            currentDocType={currentDocType}
+            onHandoff={handleHandoff}
           />
         ) : null;
+      case 'readiness': {
+        const agentNames: Record<string, string> = { RFP: 'Nova', RFI: 'Zuno', rfp: 'Nova', rfi: 'Zuno', brainstorm: 'Zia' };
+        const agentName = agentNames[currentDocType || ''] || agentNames[brief?.docType || ''] || 'Nova';
+        return (
+          <ReadinessReviewComponent
+            review={readinessReview}
+            isLoading={isReadinessLoading}
+            onGenerate={proceedToGenerate}
+            onBackToBrief={backToBrief}
+            isGenerating={isGenerating}
+            agentName={agentName}
+          />
+        );
+      }
       case 'generating':
         return (
           <GenerationNarrator
@@ -380,7 +404,7 @@ function App() {
 
       {/* Persistent floating chat — available during generation & done phases */}
       <PersistentChat
-        phase={phase === 'landing' ? 'questions' : phase === 'planning' ? 'questions' : phase === 'brief' ? 'outline_review' : phase}
+        phase={phase === 'landing' ? 'questions' : phase === 'planning' ? 'questions' : phase === 'brief' ? 'outline_review' : phase === 'readiness' ? 'outline_review' : phase}
         isGenerating={isGenerating}
         onSendMessage={sendFreeformMessage}
         sectionTitles={documentState.sections.map((s) => s.title)}

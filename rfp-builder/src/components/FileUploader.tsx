@@ -1,10 +1,8 @@
 import React, { useCallback, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
-import axios from 'axios';
 import { SectionSuggestion } from '../types';
 import { Upload, FileText, Loader2, X, Check, XCircle } from 'lucide-react';
-
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
+import { api } from '../utils/api';
 
 interface FileUploaderProps {
   isOpen: boolean;
@@ -33,7 +31,7 @@ const FileUploader: React.FC<FileUploaderProps> = ({
         const formData = new FormData();
         formData.append('file', file);
 
-        const res = await axios.post(`${API_URL}/api/upload`, formData, {
+        const res = await api.post('/api/upload', formData, {
           headers: { 'Content-Type': 'multipart/form-data' },
         });
 

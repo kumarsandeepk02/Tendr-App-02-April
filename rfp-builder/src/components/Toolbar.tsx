@@ -5,9 +5,11 @@ import { exportToPdf } from '../utils/exportPdf';
 import ModelSelector from './ModelSelector';
 import {
   FileDown,
-  FileText,
   RotateCcw,
   Loader2,
+  Search,
+  Bell,
+  Clock,
 } from 'lucide-react';
 
 interface ToolbarProps {
@@ -46,7 +48,7 @@ const Toolbar: React.FC<ToolbarProps> = ({
       await exportToDocx(documentState);
       onExportComplete();
     } catch (err: any) {
-      setExportError('Failed to export Word document. Please try again.');
+      setExportError('Failed to export Word document.');
     } finally {
       setExportingDocx(false);
     }
@@ -59,23 +61,27 @@ const Toolbar: React.FC<ToolbarProps> = ({
       await exportToPdf(documentState);
       onExportComplete();
     } catch (err: any) {
-      setExportError('Failed to export PDF. Please try again.');
+      setExportError('Failed to export PDF.');
     } finally {
       setExportingPdf(false);
     }
   };
 
   return (
-    <div className="flex items-center justify-between px-4 py-2 bg-white border-b border-gray-200">
-      {/* Left: App title */}
+    <header className="flex items-center justify-between h-14 px-6 bg-slate-50/80 backdrop-blur-xl border-b border-slate-200/60 sticky top-0 z-40">
+      {/* Left: Search */}
       <div className="flex items-center gap-4">
-        <h1 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-          <FileText size={20} className="text-indigo-600" />
-          RFP Builder
-        </h1>
+        <div className="relative">
+          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input
+            type="text"
+            placeholder="Search projects..."
+            className="bg-slate-200/40 border-none rounded-full pl-9 pr-4 py-1.5 text-sm w-72 focus:ring-2 focus:ring-indigo-500/20 focus:bg-white transition-all placeholder:text-slate-400"
+          />
+        </div>
       </div>
 
-      {/* Right: Model selector + Export + Reset */}
+      {/* Right: Actions */}
       <div className="flex items-center gap-2">
         <ModelSelector
           models={availableModels}
@@ -84,14 +90,12 @@ const Toolbar: React.FC<ToolbarProps> = ({
           disabled={isGenerating}
         />
 
-        <div className="w-px h-6 bg-gray-200 mx-1" />
-
         {exportError && (
-          <span className="text-xs text-red-500 mr-2">{exportError}</span>
+          <span className="text-xs text-red-500 mr-1">{exportError}</span>
         )}
 
         {isGenerating && (
-          <span className="text-xs text-indigo-600 font-medium mr-2 flex items-center gap-1">
+          <span className="text-xs text-indigo-600 font-medium mr-1 flex items-center gap-1">
             <Loader2 size={12} className="animate-spin" />
             Generating...
           </span>
@@ -100,44 +104,44 @@ const Toolbar: React.FC<ToolbarProps> = ({
         <button
           onClick={handleExportDocx}
           disabled={exportDisabled || exportingDocx}
-          className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-          title={isGenerating ? 'Wait for generation to complete' : ''}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-indigo-600 text-white rounded-full hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         >
-          {exportingDocx ? (
-            <Loader2 size={14} className="animate-spin" />
-          ) : (
-            <FileDown size={14} />
-          )}
+          {exportingDocx ? <Loader2 size={13} className="animate-spin" /> : <FileDown size={13} />}
           Word
         </button>
 
         <button
           onClick={handleExportPdf}
           disabled={exportDisabled || exportingPdf}
-          className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-          title={isGenerating ? 'Wait for generation to complete' : ''}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-white border border-slate-200 text-slate-600 rounded-full hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         >
-          {exportingPdf ? (
-            <Loader2 size={14} className="animate-spin" />
-          ) : (
-            <FileDown size={14} />
-          )}
+          {exportingPdf ? <Loader2 size={13} className="animate-spin" /> : <FileDown size={13} />}
           PDF
         </button>
 
-        <div className="w-px h-6 bg-gray-200 mx-1" />
+        <div className="w-px h-5 bg-slate-200 mx-1" />
 
         <button
           onClick={onReset}
           disabled={isGenerating}
-          className="flex items-center gap-1.5 px-3 py-2 text-xs text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-          title="Start over"
+          className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors disabled:opacity-40"
+          title="New project"
         >
-          <RotateCcw size={14} />
-          New
+          <RotateCcw size={15} />
         </button>
+
+        <button className="p-1.5 text-slate-400 hover:text-indigo-600 transition-colors">
+          <Bell size={16} />
+        </button>
+        <button className="p-1.5 text-slate-400 hover:text-indigo-600 transition-colors">
+          <Clock size={16} />
+        </button>
+
+        <div className="w-7 h-7 rounded-full bg-slate-200 border border-slate-300/40 ml-1 flex items-center justify-center text-xs font-semibold text-slate-600 cursor-pointer">
+          S
+        </div>
       </div>
-    </div>
+    </header>
   );
 };
 

@@ -251,7 +251,21 @@ export type OnboardingStep = 1 | 2 | 3;
 
 // ===================== V2 Types =====================
 
-export type V2Phase = 'landing' | 'planning' | 'brief' | 'generating' | 'done';
+export type V2Phase = 'landing' | 'planning' | 'brief' | 'readiness' | 'generating' | 'done';
+
+export interface ReadinessIssue {
+  severity: 'red' | 'yellow' | 'green';
+  title: string;
+  description: string;
+  suggestion: string;
+}
+
+export interface ReadinessReview {
+  status: 'red' | 'yellow' | 'green';
+  issues: ReadinessIssue[];
+  summary: string;
+  skipped?: boolean;
+}
 
 export interface BriefData {
   docType: DocumentType;
@@ -274,6 +288,7 @@ export interface BriefSection {
   description: string;
   priority: 'high' | 'medium' | 'low';
   included?: boolean;
+  responseType?: 'narrative' | 'vendor_response';
 }
 
 export type NarrationAgent = 'planning' | 'research' | 'writer' | 'reviewer';

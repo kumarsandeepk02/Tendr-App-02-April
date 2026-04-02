@@ -1,5 +1,4 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { v4 as uuidv4 } from 'uuid';
 import {
   ProjectMeta,
   ProjectIndex,
@@ -7,112 +6,80 @@ import {
   DocumentMeta,
   UnifiedFlowPhase,
 } from '../types';
+import { api } from '../utils/api';
 
-const PROJECTS_KEY = 'rfp_projects';
-const LEGACY_KEY = 'rfp_draft_current';
+/**
+ * useProjects — project management backed by Neon DB via API.
+ *
+ * Falls back to localStorage for draft state (chat messages, document sections)
+ * that hasn't been saved to the server yet (e.g., mid-planning).
+ * Project metadata (title, status, phase) is always server-authoritative.
+ */
 
 function projectStorageKey(id: string): string {
   return `rfp_project_${id}`;
 }
 
-function createEmptyProject(): ProjectMeta {
-  const now = Date.now();
-  return {
-    id: uuidv4(),
-    title: 'Untitled RFP',
-    status: 'draft',
-    documentType: 'RFP',
-    phase: 'questions',
-    createdAt: now,
-    updatedAt: now,
-  };
-}
-
-function initializeProjectIndex(): ProjectIndex {
-  // Try loading existing index
-  try {
-    const indexStr = localStorage.getItem(PROJECTS_KEY);
-    if (indexStr) {
-      const index: ProjectIndex = JSON.parse(indexStr);
-      if (index.version && index.projects) return index;
-    }
-  } catch {
-    /* fall through */
-  }
-
-  // Check for legacy draft
-  try {
-    const legacyStr = localStorage.getItem(LEGACY_KEY);
-    if (legacyStr) {
-      const legacyDraft: Draft = JSON.parse(legacyStr);
-      const project = createEmptyProject();
-
-      project.title =
-        legacyDraft.documentState?.meta?.projectTitle || 'Untitled RFP';
-      project.status =
-        legacyDraft.chatState?.phase === 'done' ? 'completed' : 'draft';
-      project.documentType =
-        legacyDraft.documentState?.meta?.type || 'RFP';
-      project.phase = legacyDraft.chatState?.phase || 'questions';
-      project.createdAt =
-        legacyDraft.documentState?.meta?.createdAt || Date.now();
-      project.updatedAt = legacyDraft.savedAt || Date.now();
-
-      // Save project data under new key
-      localStorage.setItem(
-        projectStorageKey(project.id),
-        legacyStr
-      );
-      localStorage.removeItem(LEGACY_KEY);
-
-      const index: ProjectIndex = {
-        version: 1,
-        activeProjectId: project.id,
-        projects: [project],
-      };
-      localStorage.setItem(PROJECTS_KEY, JSON.stringify(index));
-      return index;
-    }
-  } catch {
-    /* fall through */
-  }
-
-  // Fresh install
-  const project = createEmptyProject();
-  const index: ProjectIndex = {
-    version: 1,
-    activeProjectId: project.id,
-    projects: [project],
-  };
-  localStorage.setItem(PROJECTS_KEY, JSON.stringify(index));
-  return index;
-}
-
 export function useProjects() {
-  const [index, setIndex] = useState<ProjectIndex>(initializeProjectIndex);
+  const [projects, setProjects] = useState<ProjectMeta[]>([]);
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
+  const [isLoaded, setIsLoaded] = useState(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Persist index on changes (debounced)
+  // Fetch projects from server on mount
   useEffect(() => {
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(() => {
-      try {
-        localStorage.setItem(PROJECTS_KEY, JSON.stringify(index));
-      } catch {
-        /* localStorage full */
-      }
-    }, 300);
-    return () => {
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    };
-  }, [index]);
+    api.get('/api/projects')
+      .then((res) => {
+        const serverProjects: ProjectMeta[] = res.data.projects || [];
 
-  const activeProjectId = index.activeProjectId;
+        if (serverProjects.length > 0) {
+          setProjects(serverProjects);
+
+          // Restore last active project from localStorage hint
+          const lastActive = localStorage.getItem('tendr_active_project');
+          if (lastActive && serverProjects.find((p) => p.id === lastActive)) {
+            setActiveProjectId(lastActive);
+          } else {
+            setActiveProjectId(serverProjects[0].id);
+          }
+        } else {
+          // No projects — create one
+          createProjectOnServer().then((newProject) => {
+            if (newProject) {
+              setProjects([newProject]);
+              setActiveProjectId(newProject.id);
+            }
+          });
+        }
+        setIsLoaded(true);
+      })
+      .catch((err) => {
+        console.error('Failed to load projects:', err);
+        // Fallback: create a project
+        createProjectOnServer().then((newProject) => {
+          if (newProject) {
+            setProjects([newProject]);
+            setActiveProjectId(newProject.id);
+          }
+          setIsLoaded(true);
+        });
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Persist active project ID to localStorage
+  useEffect(() => {
+    if (activeProjectId) {
+      localStorage.setItem('tendr_active_project', activeProjectId);
+    }
+  }, [activeProjectId]);
 
   // Sorted by most recently updated
-  const projects = [...index.projects].sort(
+  const sortedProjects = [...projects].sort(
     (a, b) => b.updatedAt - a.updatedAt
   );
+
+  // --- Draft management (local storage for in-progress state) ---
 
   const loadProject = useCallback((projectId: string): Draft | null => {
     try {
@@ -137,69 +104,112 @@ export function useProjects() {
     []
   );
 
+  // --- Server operations ---
+
   const createProject = useCallback((): string => {
-    const project = createEmptyProject();
-    setIndex((prev) => ({
-      ...prev,
-      activeProjectId: project.id,
-      projects: [project, ...prev.projects],
-    }));
-    return project.id;
+    // Optimistic: create a temp ID, then update when server responds
+    const tempId = `temp-${Date.now()}`;
+    const now = Date.now();
+    const tempProject: ProjectMeta = {
+      id: tempId,
+      title: 'Untitled Project',
+      status: 'draft',
+      documentType: 'RFP',
+      phase: 'questions',
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    setProjects((prev) => [tempProject, ...prev]);
+    setActiveProjectId(tempId);
+
+    // Create on server
+    createProjectOnServer().then((serverProject) => {
+      if (serverProject) {
+        // Replace temp project with server project
+        setProjects((prev) =>
+          prev.map((p) => (p.id === tempId ? serverProject : p))
+        );
+        setActiveProjectId(serverProject.id);
+
+        // Migrate any localStorage draft from temp to real ID
+        const tempDraft = localStorage.getItem(projectStorageKey(tempId));
+        if (tempDraft) {
+          localStorage.setItem(projectStorageKey(serverProject.id), tempDraft);
+          localStorage.removeItem(projectStorageKey(tempId));
+        }
+      }
+    });
+
+    return tempId;
   }, []);
 
   const switchProject = useCallback(
     (targetId: string, currentDraft: Draft): Draft | null => {
-      // Save current project first
-      if (index.activeProjectId) {
-        saveProject(index.activeProjectId, currentDraft);
+      // Save current project's draft locally
+      if (activeProjectId) {
+        saveProject(activeProjectId, currentDraft);
       }
-      // Update active
-      setIndex((prev) => ({
-        ...prev,
-        activeProjectId: targetId,
-      }));
-      // Load target
+
+      setActiveProjectId(targetId);
+
+      // Load target project's draft
       return loadProject(targetId);
     },
-    [index.activeProjectId, saveProject, loadProject]
+    [activeProjectId, saveProject, loadProject]
   );
 
   const deleteProject = useCallback(
     (projectId: string) => {
+      // Remove local draft
       localStorage.removeItem(projectStorageKey(projectId));
-      setIndex((prev) => {
-        const remaining = prev.projects.filter((p) => p.id !== projectId);
-        let newActiveId = prev.activeProjectId;
 
-        if (prev.activeProjectId === projectId) {
-          // Switch to first remaining, or create new
+      // Remove from state
+      setProjects((prev) => {
+        const remaining = prev.filter((p) => p.id !== projectId);
+
+        // If we deleted the active project, switch to first remaining
+        if (activeProjectId === projectId) {
           if (remaining.length > 0) {
-            newActiveId = remaining[0].id;
+            setActiveProjectId(remaining[0].id);
           } else {
-            const fresh = createEmptyProject();
-            remaining.push(fresh);
-            newActiveId = fresh.id;
+            // Create a new project
+            createProjectOnServer().then((newProject) => {
+              if (newProject) {
+                setProjects((p) => [...p, newProject]);
+                setActiveProjectId(newProject.id);
+              }
+            });
           }
         }
 
-        return {
-          ...prev,
-          activeProjectId: newActiveId,
-          projects: remaining,
-        };
+        return remaining;
+      });
+
+      // Delete on server (don't block UI)
+      api.delete(`/api/projects/${projectId}`).catch((err) => {
+        console.error('Failed to delete project on server:', err);
       });
     },
-    []
+    [activeProjectId]
   );
 
   const updateProjectMeta = useCallback(
     (projectId: string, updates: Partial<ProjectMeta>) => {
-      setIndex((prev) => ({
-        ...prev,
-        projects: prev.projects.map((p) =>
+      // Update local state immediately
+      setProjects((prev) =>
+        prev.map((p) =>
           p.id === projectId ? { ...p, ...updates } : p
-        ),
-      }));
+        )
+      );
+
+      // Debounced sync to server
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = setTimeout(() => {
+        api.patch(`/api/projects/${projectId}`, updates).catch((err) => {
+          console.error('Failed to sync project meta:', err);
+        });
+      }, 500);
     },
     []
   );
@@ -208,7 +218,7 @@ export function useProjects() {
     (phase: UnifiedFlowPhase, docMeta: DocumentMeta) => {
       if (!activeProjectId) return;
       updateProjectMeta(activeProjectId, {
-        title: docMeta.projectTitle || 'Untitled RFP',
+        title: docMeta.projectTitle || 'Untitled Project',
         documentType: docMeta.type,
         phase,
         status: phase === 'done' ? 'completed' : 'draft',
@@ -219,8 +229,9 @@ export function useProjects() {
   );
 
   return {
-    projects,
+    projects: sortedProjects,
     activeProjectId,
+    isLoaded,
     createProject,
     switchProject,
     deleteProject,
@@ -229,4 +240,18 @@ export function useProjects() {
     syncProjectMeta,
     updateProjectMeta,
   };
+}
+
+// Helper: create project on server
+async function createProjectOnServer(): Promise<ProjectMeta | null> {
+  try {
+    const res = await api.post('/api/projects', {
+      title: 'Untitled Project',
+      documentType: 'RFP',
+    });
+    return res.data;
+  } catch (err) {
+    console.error('Failed to create project on server:', err);
+    return null;
+  }
 }

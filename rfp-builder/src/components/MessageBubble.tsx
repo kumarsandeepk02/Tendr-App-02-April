@@ -1,6 +1,7 @@
 import React from 'react';
 import { ChatMessage } from '../types';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { AlertCircle, RotateCcw, Bot, User } from 'lucide-react';
 
 interface MessageBubbleProps {
@@ -58,7 +59,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onRetry }) => {
               : ''
           }`}
         >
-          <ReactMarkdown>{message.content}</ReactMarkdown>
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
         </div>
 
         <div
