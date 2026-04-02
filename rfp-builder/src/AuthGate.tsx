@@ -4,7 +4,7 @@ import LoginPage from './components/LoginPage';
 import App from './App';
 
 export default function AuthGate() {
-  const { isAuthenticated, isLoading, login, logout, profile } = useAuth();
+  const { isAuthenticated, isLoading, login } = useAuth();
 
   // Loading state — checking session
   if (isLoading) {

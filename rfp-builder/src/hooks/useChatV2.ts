@@ -478,9 +478,6 @@ export function useChatV2(options?: UseChatV2Options) {
 
   // Warm handoff from Zia (brainstorm) to Nova (RFP) or Zuno (RFI)
   const handleHandoff = useCallback((targetDocType: 'RFP' | 'RFI') => {
-    const agentNames: Record<string, string> = { RFP: 'Nova', RFI: 'Zuno' };
-    const agentName = agentNames[targetDocType];
-
     // Add a warm handoff message from Zia
     const handoffMessages: Record<string, string> = {
       RFP: `I think you're ready for the next step. Let me hand this over to Nova — she's our RFP specialist and she's brilliant at turning ideas into structured documents. She'll have all the context from our conversation, so you can pick up right where we left off.`,
@@ -686,7 +683,7 @@ export function useChatV2(options?: UseChatV2Options) {
         return 'Sorry, something went wrong. Please try again.';
       }
     },
-    [brief, selectedModel]
+    [brief, selectedModel, currentDocType]
   );
 
   // Reset everything

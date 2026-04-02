@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { FileText, Search, MessageSquare, ArrowRight, Sparkles } from 'lucide-react';
+import React from 'react';
+import { FileText, Search, ArrowRight, Sparkles } from 'lucide-react';
 
 interface LandingPageProps {
   onStartRFP: () => void;
@@ -115,9 +115,9 @@ const LandingPage: React.FC<LandingPageProps> = ({
             &copy; {new Date().getFullYear()} Tendr. All rights reserved.
           </p>
           <div className="flex gap-6 mt-3 md:mt-0 text-[10px] font-bold uppercase tracking-widest">
-            <a href="#" className="hover:text-indigo-600 transition-colors">Privacy Policy</a>
-            <a href="#" className="hover:text-indigo-600 transition-colors">Terms of Service</a>
-            <a href="#" className="hover:text-indigo-600 transition-colors">Compliance</a>
+            <button className="hover:text-indigo-600 transition-colors">Privacy Policy</button>
+            <button className="hover:text-indigo-600 transition-colors">Terms of Service</button>
+            <button className="hover:text-indigo-600 transition-colors">Compliance</button>
           </div>
         </div>
       </div>

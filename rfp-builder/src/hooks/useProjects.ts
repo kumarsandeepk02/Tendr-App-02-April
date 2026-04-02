@@ -1,7 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import {
   ProjectMeta,
-  ProjectIndex,
   Draft,
   DocumentMeta,
   UnifiedFlowPhase,
