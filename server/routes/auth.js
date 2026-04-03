@@ -35,12 +35,23 @@ function sessionCookieOptions() {
   return {
     httpOnly: true,
     secure: IS_PROD,
-    sameSite: 'lax',
+    sameSite: IS_PROD ? 'none' : 'lax', // 'none' required for cross-origin cookies
     path: '/',
     maxAge: 24 * 60 * 60 * 1000, // 24 hours
     signed: true,
   };
 }
+
+// ── Server-side state store for OAuth CSRF protection ────────────────────
+// Cookies don't survive Vercel's reverse proxy, so we store state server-side.
+// Map<state_string, { createdAt: number }>. Entries expire after 10 minutes.
+const pendingStates = new Map();
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, val] of pendingStates) {
+    if (now - val.createdAt > 10 * 60 * 1000) pendingStates.delete(key);
+  }
+}, 60_000);
 
 /**
  * GET /api/auth/login
@@ -60,15 +71,7 @@ router.get('/login', (req, res) => {
 
   // Generate cryptographically random state for CSRF protection
   const state = crypto.randomBytes(32).toString('hex');
-
-  // Store state in a short-lived signed cookie
-  res.cookie('oauth_state', state, {
-    httpOnly: true,
-    secure: IS_PROD,
-    sameSite: 'lax',
-    maxAge: 10 * 60 * 1000, // 10 minutes
-    signed: true,
-  });
+  pendingStates.set(state, { createdAt: Date.now() });
 
   const authorizationUrl = workos.userManagement.getAuthorizationUrl({
     provider: 'authkit',
@@ -83,7 +86,7 @@ router.get('/login', (req, res) => {
 /**
  * GET /api/auth/callback?code=xxx&state=yyy
  * Exchanges the authorization code for a user + session.
- * Sets an HttpOnly session cookie instead of returning tokens in the URL.
+ * Redirects to frontend with a one-time exchange code.
  */
 router.get('/callback', async (req, res) => {
   try {
@@ -97,13 +100,11 @@ router.get('/callback', async (req, res) => {
 
     const { code, state } = req.query;
 
-    // ── Validate OAuth state ───────────────────────────────────────────
-    const storedState = req.signedCookies?.oauth_state;
-    res.clearCookie('oauth_state', { path: '/', domain: IS_PROD ? '.moleculeone.ai' : undefined });
-
-    if (!state || !storedState || state !== storedState) {
+    // ── Validate OAuth state (server-side store) ─────────────────────
+    if (!state || !pendingStates.has(state)) {
       return res.redirect(`${process.env.FRONTEND_URL}/auth/error?reason=invalid_state`);
     }
+    pendingStates.delete(state);
 
     if (!code) {
       return res.redirect(`${process.env.FRONTEND_URL}/auth/error?reason=missing_code`);
@@ -119,16 +120,48 @@ router.get('/callback', async (req, res) => {
       'Authentication provider timed out'
     );
 
-    // ── Set HttpOnly session cookie ────────────────────────────────────
-    res.cookie('tendr_session', result.accessToken, sessionCookieOptions());
+    // Store access token in a one-time exchange code
+    const exchangeCode = crypto.randomBytes(32).toString('hex');
+    pendingStates.set(`exchange:${exchangeCode}`, {
+      createdAt: Date.now(),
+      accessToken: result.accessToken,
+    });
 
-    // Redirect to frontend callback without any tokens in the URL
-    res.redirect(`${process.env.FRONTEND_URL}/auth/callback`);
+    // Redirect to frontend with the exchange code
+    res.redirect(`${process.env.FRONTEND_URL}/auth/callback?exchange_code=${exchangeCode}`);
   } catch (error) {
     console.error('Auth callback error:', error.message);
     const reason = error.message.includes('timed out') ? 'timeout' : 'exchange_failed';
     res.redirect(`${process.env.FRONTEND_URL}/auth/error?reason=${reason}`);
   }
+});
+
+/**
+ * POST /api/auth/exchange
+ * Exchanges a one-time code for a session cookie.
+ * Called by the frontend after the callback redirect.
+ */
+router.post('/exchange', (req, res) => {
+  const { exchange_code } = req.body;
+  if (!exchange_code) {
+    return res.status(400).json({ error: 'Missing exchange code' });
+  }
+
+  const key = `exchange:${exchange_code}`;
+  const entry = pendingStates.get(key);
+  pendingStates.delete(key);
+
+  if (!entry || !entry.accessToken) {
+    return res.status(401).json({ error: 'Invalid or expired exchange code' });
+  }
+
+  // Check expiry (10 minutes)
+  if (Date.now() - entry.createdAt > 10 * 60 * 1000) {
+    return res.status(401).json({ error: 'Exchange code expired' });
+  }
+
+  res.cookie('tendr_session', entry.accessToken, sessionCookieOptions());
+  res.json({ success: true });
 });
 
 /**
@@ -145,7 +178,7 @@ router.get('/me', authMiddleware, (req, res) => {
  * Clears the session cookie.
  */
 router.post('/logout', (req, res) => {
-  res.clearCookie('tendr_session', { path: '/', domain: IS_PROD ? '.moleculeone.ai' : undefined });
+  res.clearCookie('tendr_session', { path: '/' });
   res.json({ success: true });
 });
 

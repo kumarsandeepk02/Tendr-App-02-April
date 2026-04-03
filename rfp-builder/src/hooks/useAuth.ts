@@ -1,6 +1,13 @@
 import { useState, useEffect, useCallback } from 'react';
 
+// In production: empty string → same-origin (Vercel proxies /api/* to App Runner).
+// In dev: hit local server directly.
 const API_URL = process.env.REACT_APP_API_URL ?? 'http://localhost:3001';
+
+// Direct URL to App Runner for cookie-setting requests.
+// Vercel proxy strips Set-Cookie headers, so auth exchange + session
+// calls must go directly to the backend.
+const DIRECT_API_URL = process.env.REACT_APP_DIRECT_API_URL || API_URL;
 
 interface UserProfile {
   id: string;
@@ -29,11 +36,33 @@ export function useAuth() {
     checkSession();
   }, []);
 
-  // Handle auth callback redirect (server already set the session cookie)
+  // Handle auth callback — exchange code for session cookie
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const exchangeCode = params.get('exchange_code');
     const path = window.location.pathname;
-    if (path === '/auth/callback') {
-      // Clean the URL, then verify the session cookie
+
+    if (path === '/auth/callback' && exchangeCode) {
+      window.history.replaceState({}, '', '/');
+      // Exchange the one-time code for a session cookie (direct to backend)
+      fetch(`${DIRECT_API_URL}/api/auth/exchange`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ exchange_code: exchangeCode }),
+      })
+        .then((res) => {
+          if (res.ok) {
+            checkSession();
+          } else {
+            setAuth({ isAuthenticated: false, isLoading: false, profile: null });
+          }
+        })
+        .catch(() => {
+          setAuth({ isAuthenticated: false, isLoading: false, profile: null });
+        });
+    } else if (path === '/auth/callback') {
+      // Dev mode callback — no exchange code needed
       window.history.replaceState({}, '', '/');
       checkSession();
     }
@@ -41,7 +70,7 @@ export function useAuth() {
 
   async function checkSession() {
     try {
-      const res = await fetch(`${API_URL}/api/auth/me`, {
+      const res = await fetch(`${DIRECT_API_URL}/api/auth/me`, {
         credentials: 'include',
       });
       if (res.ok) {
@@ -67,7 +96,6 @@ export function useAuth() {
       const data = await res.json();
 
       if (data.dev) {
-        // Dev mode — server auto-authenticates via dev bypass
         await checkSession();
         return;
       }
@@ -82,14 +110,13 @@ export function useAuth() {
 
   const logout = useCallback(async () => {
     try {
-      await fetch(`${API_URL}/api/auth/logout`, {
+      await fetch(`${DIRECT_API_URL}/api/auth/logout`, {
         method: 'POST',
         credentials: 'include',
       });
     } catch {
-      // Best-effort — clear local state regardless
+      // Best-effort
     }
-    // Clean up any legacy localStorage entries
     localStorage.removeItem('tendr_token');
     localStorage.removeItem('tendr_profile');
     localStorage.removeItem('tendr_user');
@@ -105,7 +132,6 @@ export function useAuth() {
 
 /**
  * Returns empty headers — auth is now handled by session cookies.
- * Kept for backward compatibility with any remaining callers.
  */
 export function getAuthHeaders(): Record<string, string> {
   return {};

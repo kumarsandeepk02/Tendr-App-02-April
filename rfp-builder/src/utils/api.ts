@@ -1,13 +1,17 @@
 import axios from 'axios';
 
-const API_URL = process.env.REACT_APP_API_URL ?? 'http://localhost:3001';
+// Direct URL to App Runner — cookies (session auth) must go directly
+// to the backend, not through Vercel's proxy which strips Set-Cookie.
+const DIRECT_API_URL = process.env.REACT_APP_DIRECT_API_URL
+  || process.env.REACT_APP_API_URL
+  || 'http://localhost:3001';
 
 /**
  * Pre-configured axios instance.
- * Auth is handled by HttpOnly session cookies — no header injection needed.
+ * Auth is handled by HttpOnly session cookies sent directly to App Runner.
  */
 export const api = axios.create({
-  baseURL: API_URL,
+  baseURL: DIRECT_API_URL,
   withCredentials: true,
 });
 
@@ -30,4 +34,4 @@ export function authFetch(url: string, options: RequestInit = {}): Promise<Respo
   return fetch(url, { ...options, credentials: 'include' });
 }
 
-export { API_URL };
+export const API_URL = DIRECT_API_URL;
