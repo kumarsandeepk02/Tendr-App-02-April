@@ -50,7 +50,6 @@ function App() {
     switchProject,
     deleteProject,
     syncProjectMeta,
-    moveDocument,
   } = useProjects();
 
   // Creation dialog state
