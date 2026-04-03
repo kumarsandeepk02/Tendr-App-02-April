@@ -39,7 +39,6 @@ function sessionCookieOptions() {
     path: '/',
     maxAge: 24 * 60 * 60 * 1000, // 24 hours
     signed: true,
-    domain: IS_PROD ? '.moleculeone.ai' : undefined,
   };
 }
 
@@ -69,7 +68,6 @@ router.get('/login', (req, res) => {
     sameSite: 'lax',
     maxAge: 10 * 60 * 1000, // 10 minutes
     signed: true,
-    domain: IS_PROD ? '.moleculeone.ai' : undefined,
   });
 
   const authorizationUrl = workos.userManagement.getAuthorizationUrl({
