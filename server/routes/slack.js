@@ -10,7 +10,7 @@ const crypto = require('crypto');
 const fetch = require('node-fetch');
 const { WebClient } = require('@slack/web-api');
 const { resolveUser } = require('../services/chatPlatform/userResolver');
-const { handleMessage } = require('../services/chatPlatform/bridge');
+const { handleMessage, resolveConversation } = require('../services/chatPlatform/bridge');
 const { formatAuthLink, downloadSlackFile } = require('../services/chatPlatform/slackAdapter');
 
 const router = express.Router();
@@ -364,7 +364,6 @@ async function handleMention(event, workspaceId) {
 async function handleChannelThread(event, workspaceId) {
   if (!event.thread_ts) return; // Not in a thread — ignore
 
-  const { resolveConversation } = require('../services/chatPlatform/bridge');
   const convo = await resolveConversation('slack', event.channel, event.thread_ts);
   if (!convo) return; // Not a thread we're tracking
 
@@ -373,7 +372,9 @@ async function handleChannelThread(event, workspaceId) {
 }
 
 /**
- * Handle file uploads in conversations.
+ * Handle file uploads: download, parse, save to DB, then route through
+ * handleMessage so the planning agent gets the file context with proper
+ * identity override and prompt defense.
  */
 async function handleFileUpload(event, profile, channelId, conversationKey, threadTs) {
   const { resolveConversation } = require('../services/chatPlatform/bridge');
@@ -414,6 +415,7 @@ async function handleFileUpload(event, profile, channelId, conversationKey, thre
         extractedText = buffer.toString('utf-8');
       }
 
+      // Save file record
       await db.insert(uploadedFiles).values({
         projectId: convo.projectId,
         userId: profile.id,
@@ -423,35 +425,26 @@ async function handleFileUpload(event, profile, channelId, conversationKey, thre
         extractedText: extractedText.substring(0, 50000),
       });
 
+      // Append to project fileContext
       const [project] = await db.select().from(projects).where(eq(projects.id, convo.projectId)).limit(1);
-      const existingContext = project?.fileContext || '';
-      const newContext = existingContext + `\n\n--- ${file.name} ---\n${extractedText.substring(0, 10000)}`;
-
+      const newContext = (project?.fileContext || '') + `\n\n--- ${file.name} ---\n${extractedText.substring(0, 10000)}`;
       await db.update(projects).set({ fileContext: newContext, updatedAt: new Date() }).where(eq(projects.id, convo.projectId));
 
       await postSlackMessage(channelId, `Got it — I've added *${file.name}* to the project.`, null, { threadTs });
 
-      const { planningChat } = require('../services/agents/planningAgent');
-      const planningMessages = [...(project?.planningMessages || [])];
-      planningMessages.push({
-        role: 'user',
-        content: `[Uploaded file: ${file.name}]`,
-        source: 'slack',
-        sourceMessageId: event.ts,
-        authorId: profile.id,
-        timestamp: new Date().toISOString(),
+      // Route through handleMessage so the planning agent gets proper context
+      await handleMessage({
+        profileId: profile.id,
+        profile,
+        message: `[Uploaded file: ${file.name}]`,
+        platform: 'slack',
+        channelId,
+        threadId: conversationKey,
+        messageId: event.ts,
+        postMessage: async (text, blocks) => {
+          await postSlackMessage(channelId, text, blocks, { threadTs });
+        },
       });
-
-      const agentResponse = await planningChat({
-        messages: planningMessages,
-        fileContext: newContext,
-        model: project?.model || 'sonnet',
-        docType: project?.documentType || 'rfp',
-      });
-
-      planningMessages.push({ role: 'assistant', content: agentResponse, source: 'agent', timestamp: new Date().toISOString() });
-      await db.update(projects).set({ planningMessages, updatedAt: new Date() }).where(eq(projects.id, convo.projectId));
-      await postSlackMessage(channelId, agentResponse, null, { threadTs });
     } catch (err) {
       console.error(`File processing error (${file.name}):`, err.message);
       await postSlackMessage(channelId, `I couldn't process *${file.name}* — try uploading it directly in Tendr instead.`, null, { threadTs });
