@@ -21,6 +21,7 @@ const chatRoutes = require('./routes/chat');
 const uploadRoutes = require('./routes/upload');
 const authRoutes = require('./routes/auth');
 const projectRoutes = require('./routes/projects');
+const folderRoutes = require('./routes/folders');
 const { authMiddleware } = require('./middleware/auth');
 const { promptDefenseMiddleware } = require('./services/security/promptDefense');
 
@@ -106,6 +107,7 @@ app.get('/api/health', (req, res) => {
 });
 
 // ── Protected routes — auth required ────────────────────────────────────────
+app.use('/api/folders', authMiddleware, folderRoutes);
 app.use('/api/projects', authMiddleware, projectRoutes);
 app.use('/api/upload', authMiddleware, uploadRoutes);
 

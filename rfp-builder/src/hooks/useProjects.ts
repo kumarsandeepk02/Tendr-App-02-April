@@ -105,43 +105,43 @@ export function useProjects() {
 
   // --- Server operations ---
 
-  const createProject = useCallback((): string => {
-    // Optimistic: create a temp ID, then update when server responds
-    const tempId = `temp-${Date.now()}`;
-    const now = Date.now();
-    const tempProject: ProjectMeta = {
-      id: tempId,
-      title: 'Untitled Project',
-      status: 'draft',
-      documentType: 'RFP',
-      phase: 'questions',
-      createdAt: now,
-      updatedAt: now,
-    };
+  const createProject = useCallback(
+    (opts?: { title?: string; documentType?: string; folderId?: string }): string => {
+      const tempId = `temp-${Date.now()}`;
+      const now = Date.now();
+      const tempProject: ProjectMeta = {
+        id: tempId,
+        title: opts?.title || 'Untitled Document',
+        status: 'draft',
+        documentType: (opts?.documentType?.toUpperCase() || 'RFP') as ProjectMeta['documentType'],
+        phase: 'questions',
+        folderId: opts?.folderId || null,
+        createdAt: now,
+        updatedAt: now,
+      };
 
-    setProjects((prev) => [tempProject, ...prev]);
-    setActiveProjectId(tempId);
+      setProjects((prev) => [tempProject, ...prev]);
+      setActiveProjectId(tempId);
 
-    // Create on server
-    createProjectOnServer().then((serverProject) => {
-      if (serverProject) {
-        // Replace temp project with server project
-        setProjects((prev) =>
-          prev.map((p) => (p.id === tempId ? serverProject : p))
-        );
-        setActiveProjectId(serverProject.id);
+      createProjectOnServer(opts).then((serverProject) => {
+        if (serverProject) {
+          setProjects((prev) =>
+            prev.map((p) => (p.id === tempId ? serverProject : p))
+          );
+          setActiveProjectId(serverProject.id);
 
-        // Migrate any localStorage draft from temp to real ID
-        const tempDraft = localStorage.getItem(projectStorageKey(tempId));
-        if (tempDraft) {
-          localStorage.setItem(projectStorageKey(serverProject.id), tempDraft);
-          localStorage.removeItem(projectStorageKey(tempId));
+          const tempDraft = localStorage.getItem(projectStorageKey(tempId));
+          if (tempDraft) {
+            localStorage.setItem(projectStorageKey(serverProject.id), tempDraft);
+            localStorage.removeItem(projectStorageKey(tempId));
+          }
         }
-      }
-    });
+      });
 
-    return tempId;
-  }, []);
+      return tempId;
+    },
+    []
+  );
 
   const switchProject = useCallback(
     (targetId: string, currentDraft: Draft): Draft | null => {
@@ -227,7 +227,7 @@ export function useProjects() {
     (phase: UnifiedFlowPhase, docMeta: DocumentMeta) => {
       if (!activeProjectId) return;
       updateProjectMeta(activeProjectId, {
-        title: docMeta.projectTitle || 'Untitled Project',
+        title: docMeta.projectTitle || 'Untitled Document',
         documentType: docMeta.type,
         phase,
         status: phase === 'done' ? 'completed' : 'draft',
@@ -235,6 +235,23 @@ export function useProjects() {
       });
     },
     [activeProjectId, updateProjectMeta]
+  );
+
+  const moveDocument = useCallback(
+    async (projectId: string, folderId: string | null) => {
+      setProjects((prev) =>
+        prev.map((p) =>
+          p.id === projectId ? { ...p, folderId, updatedAt: Date.now() } : p
+        )
+      );
+
+      try {
+        await api.patch(`/api/projects/${projectId}`, { folderId });
+      } catch (err) {
+        console.error('Failed to move document:', err);
+      }
+    },
+    []
   );
 
   return {
@@ -248,15 +265,18 @@ export function useProjects() {
     loadProject,
     syncProjectMeta,
     updateProjectMeta,
+    moveDocument,
   };
 }
 
-// Helper: create project on server
-async function createProjectOnServer(): Promise<ProjectMeta | null> {
+async function createProjectOnServer(
+  opts?: { title?: string; documentType?: string; folderId?: string }
+): Promise<ProjectMeta | null> {
   try {
     const res = await api.post('/api/projects', {
-      title: 'Untitled Project',
-      documentType: 'RFP',
+      title: opts?.title || 'Untitled Document',
+      documentType: opts?.documentType || 'RFP',
+      folderId: opts?.folderId || undefined,
     });
     return res.data;
   } catch (err) {

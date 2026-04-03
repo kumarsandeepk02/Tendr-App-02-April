@@ -117,12 +117,22 @@ export interface FeedbackEntry {
 
 export type ProjectStatus = 'draft' | 'completed';
 
+export interface FolderMeta {
+  id: string;
+  name: string;
+  description?: string;
+  documentCount: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface ProjectMeta {
   id: string;
   title: string;
   status: ProjectStatus;
   documentType: DocumentType;
   phase: UnifiedFlowPhase;
+  folderId?: string | null;
   createdAt: number;
   updatedAt: number;
 }
