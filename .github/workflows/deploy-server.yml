@@ -40,8 +40,7 @@ jobs:
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
           echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
 
-      - name: Deploy to App Runner
+      - name: Trigger App Runner deployment
         run: |
-          aws apprunner update-service \
-            --service-arn ${{ secrets.APP_RUNNER_SERVICE_ARN }} \
-            --source-configuration '{"ImageRepository":{"ImageIdentifier":"${{ steps.build-image.outputs.image }}","ImageRepositoryType":"ECR"}}'
+          aws apprunner start-deployment \
+            --service-arn ${{ secrets.APP_RUNNER_SERVICE_ARN }}
