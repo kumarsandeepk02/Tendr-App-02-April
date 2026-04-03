@@ -7,23 +7,12 @@ const { eq } = require('drizzle-orm');
  * Run the document generation pipeline asynchronously.
  * Designed for Slack/Teams: no streaming, just start + done callbacks.
  *
- * @param {Object} opts
- * @param {string} opts.projectId - Project to generate for
- * @param {Object} opts.brief - Brief data with suggestedSections
- * @param {Object} opts.project - Full project record
- * @param {Function} opts.onStart - Called when pipeline begins
- * @param {Function} opts.onDone - Called with { sectionCount } when complete
- * @param {Function} opts.onError - Called with error message on failure
+ * NOTE: Neon HTTP driver doesn't support real transactions. We use
+ * sequential operations instead (delete then insert).
  */
 async function runAsync({ projectId, brief, project, onStart, onDone, onError }) {
   try {
     if (onStart) onStart();
-
-    // Update phase to generating
-    await db
-      .update(projects)
-      .set({ phase: 'generating', updatedAt: new Date() })
-      .where(eq(projects.id, projectId));
 
     const confirmedSections = (brief.suggestedSections || []).filter((s) => s.included !== false);
     const completedSections = [];
@@ -45,22 +34,21 @@ async function runAsync({ projectId, brief, project, onStart, onDone, onError })
         },
         onDone: async () => {
           try {
-            // Save sections to DB
+            // Save sections — sequential ops instead of transaction
             if (completedSections.length > 0) {
-              await db.transaction(async (tx) => {
-                // Clear existing sections
-                await tx.delete(documentSections).where(eq(documentSections.projectId, projectId));
-                // Insert new sections
-                await tx.insert(documentSections).values(
-                  completedSections.map((s, i) => ({
-                    projectId,
-                    title: s.title,
-                    content: s.content || '',
-                    sectionType: 'informational',
-                    order: i,
-                  }))
-                );
-              });
+              // Delete existing sections first
+              await db.delete(documentSections).where(eq(documentSections.projectId, projectId));
+
+              // Insert new sections
+              await db.insert(documentSections).values(
+                completedSections.map((s, i) => ({
+                  projectId,
+                  title: s.title,
+                  content: s.content || '',
+                  sectionType: 'informational',
+                  order: i,
+                }))
+              );
             }
 
             // Update project phase to done
