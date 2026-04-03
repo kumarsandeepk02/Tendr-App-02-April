@@ -1,8 +1,8 @@
 import axios from 'axios';
 
-// Auth: Bearer token in sessionStorage, sent as Authorization header.
-// Same-origin in production (Vercel proxy rewrites /api/* to App Runner).
-const API_BASE = process.env.REACT_APP_API_URL ?? 'http://localhost:3001';
+// In production, Vercel proxy rewrites /api/* to App Runner — use relative paths (empty string).
+// In dev, REACT_APP_API_URL points to localhost:3001.
+const API_BASE = process.env.REACT_APP_API_URL || '';
 
 // ── Session token helpers ──────────────────────────────────────────────────
 const TOKEN_KEY = 'tendr_session';
