@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { ProjectMeta, FolderMeta } from '../types';
 import {
-  Plus,
   Trash2,
   Settings,
   HelpCircle,
