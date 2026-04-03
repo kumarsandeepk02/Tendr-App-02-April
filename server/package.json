@@ -18,6 +18,8 @@
     "@anthropic-ai/sdk": "^0.78.0",
     "@neondatabase/serverless": "^1.0.2",
     "@sentry/node": "^10.47.0",
+    "@slack/bolt": "^4.6.0",
+    "@slack/web-api": "^7.15.0",
     "@workos-inc/node": "^8.10.0",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
