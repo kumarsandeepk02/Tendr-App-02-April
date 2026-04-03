@@ -37,8 +37,9 @@ function formatMessage(text, { deepLink, buttonText } = {}) {
 /**
  * Format the auth link message for unlinked users.
  */
-function formatAuthLink(slackUserId) {
-  const authUrl = `${FRONTEND_URL}/auth?linkSlack=${encodeURIComponent(slackUserId)}`;
+function formatAuthLink(slackUserId, workspaceId) {
+  const baseUrl = process.env.PUBLIC_URL || FRONTEND_URL;
+  const authUrl = `${baseUrl}/api/auth/login?linkSlack=${encodeURIComponent(slackUserId)}&workspaceId=${encodeURIComponent(workspaceId || '')}`;
   return formatMessage(
     `Hey! I don't think we've met yet. Link your Tendr account so I can help you out:`,
     { deepLink: authUrl, buttonText: 'Sign in to Tendr' }

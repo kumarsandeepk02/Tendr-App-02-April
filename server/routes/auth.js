@@ -71,7 +71,15 @@ router.get('/login', (req, res) => {
 
   // Generate cryptographically random state for CSRF protection
   const state = crypto.randomBytes(32).toString('hex');
-  pendingStates.set(state, { createdAt: Date.now() });
+  const stateData = { createdAt: Date.now() };
+
+  // If this login was triggered from Slack (Penny auth link), stash the Slack IDs
+  if (req.query.linkSlack) {
+    stateData.linkSlack = req.query.linkSlack;
+    stateData.slackWorkspaceId = req.query.workspaceId || '';
+  }
+
+  pendingStates.set(state, stateData);
 
   const authorizationUrl = workos.userManagement.getAuthorizationUrl({
     provider: 'authkit',
@@ -80,6 +88,11 @@ router.get('/login', (req, res) => {
     state,
   });
 
+  // If called from Slack (direct browser redirect), redirect directly instead of returning JSON
+  if (req.query.linkSlack) {
+    return res.redirect(authorizationUrl);
+  }
+
   res.json({ url: authorizationUrl });
 });
 
@@ -87,6 +100,9 @@ router.get('/login', (req, res) => {
  * GET /api/auth/callback?code=xxx&state=yyy
  * Exchanges the authorization code for a user + session.
  * Redirects to frontend with a one-time exchange code.
+ *
+ * If state contains a linkSlack param, the Slack identity is linked
+ * to the authenticated user's profile automatically.
  */
 router.get('/callback', async (req, res) => {
   try {
@@ -104,6 +120,7 @@ router.get('/callback', async (req, res) => {
     if (!state || !pendingStates.has(state)) {
       return res.redirect(`${process.env.FRONTEND_URL}/auth/error?reason=invalid_state`);
     }
+    const stateData = pendingStates.get(state);
     pendingStates.delete(state);
 
     if (!code) {
@@ -119,6 +136,31 @@ router.get('/callback', async (req, res) => {
       10_000,
       'Authentication provider timed out'
     );
+
+    // ── Link Slack identity if this auth was triggered from Penny ────
+    if (stateData.linkSlack && stateData.slackWorkspaceId) {
+      try {
+        const { resolveProfile } = require('../middleware/auth');
+        const { linkExternalIdentity } = require('../services/chatPlatform/userResolver');
+
+        // Decode JWT to get user ID
+        const parts = result.accessToken.split('.');
+        const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+        const profile = await resolveProfile(payload.sub, {
+          fullName: `${result.user?.firstName || ''} ${result.user?.lastName || ''}`.trim(),
+        });
+
+        await linkExternalIdentity({
+          profileId: profile.id,
+          provider: 'slack',
+          externalUserId: stateData.linkSlack,
+          externalWorkspaceId: stateData.slackWorkspaceId,
+        });
+        console.log(`Linked Slack user ${stateData.linkSlack} to profile ${profile.id}`);
+      } catch (linkErr) {
+        console.error('Slack identity link failed (non-blocking):', linkErr.message);
+      }
+    }
 
     // Store access token in a one-time exchange code
     const exchangeCode = crypto.randomBytes(32).toString('hex');
