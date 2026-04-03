@@ -5,6 +5,7 @@ interface LandingPageProps {
   onStartRFP: () => void;
   onStartRFI: () => void;
   onStartFreeform: () => void;
+  onStartDocument?: (docType: 'RFP' | 'RFI' | 'brainstorm') => void;
 }
 
 // Dynamic market activity data — source TBD
@@ -18,6 +19,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
   onStartRFP,
   onStartRFI,
   onStartFreeform,
+  onStartDocument,
 }) => {
   return (
     <div className="flex-1 overflow-y-auto">
@@ -44,7 +46,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
             iconBg="bg-indigo-600"
             iconColor="text-white"
             accentColor="indigo"
-            onClick={onStartRFP}
+            onClick={onStartDocument ? () => onStartDocument('RFP') : onStartRFP}
           />
 
           {/* Zuno — RFI */}
@@ -56,7 +58,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
             iconBg="bg-slate-700"
             iconColor="text-white"
             accentColor="indigo"
-            onClick={onStartRFI}
+            onClick={onStartDocument ? () => onStartDocument('RFI') : onStartRFI}
           />
 
           {/* Zia — Brainstorm */}
@@ -68,7 +70,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
             iconBg="bg-slate-200"
             iconColor="text-indigo-600"
             accentColor="indigo"
-            onClick={onStartFreeform}
+            onClick={onStartDocument ? () => onStartDocument('brainstorm') : onStartFreeform}
           />
         </div>
 

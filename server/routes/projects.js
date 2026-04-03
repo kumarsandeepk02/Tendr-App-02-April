@@ -2,7 +2,7 @@ const express = require('express');
 const { db } = require('../db');
 const { projects, documentSections, qualityReviews, competitiveIntel, documentAnalyses } = require('../db/schema');
 const { getAuth } = require('../middleware/auth');
-const { eq, and, desc } = require('drizzle-orm');
+const { eq, and, desc, isNull } = require('drizzle-orm');
 
 const router = express.Router();
 
@@ -14,19 +14,27 @@ router.get('/', async (req, res) => {
   try {
     const { profileId } = getAuth(req);
 
+    // Optional folderId filter: ?folderId=none (standalone) or ?folderId=<uuid>
+    const conditions = [eq(projects.userId, profileId)];
+    if (req.query.folderId === 'none') {
+      conditions.push(isNull(projects.folderId));
+    } else if (req.query.folderId) {
+      conditions.push(eq(projects.folderId, req.query.folderId));
+    }
+
     const rows = await db
       .select()
       .from(projects)
-      .where(eq(projects.userId, profileId))
+      .where(and(...conditions))
       .orderBy(desc(projects.updatedAt));
 
-    // Map DB rows to frontend ProjectMeta shape
     const result = rows.map((p) => ({
       id: p.id,
       title: p.title,
       status: p.status === 'generated' || p.status === 'exported' ? 'completed' : 'draft',
       documentType: (p.documentType || 'rfp').toUpperCase(),
       phase: mapPhaseToFrontend(p.phase),
+      folderId: p.folderId || null,
       createdAt: new Date(p.createdAt).getTime(),
       updatedAt: new Date(p.updatedAt).getTime(),
     }));
@@ -45,14 +53,15 @@ router.get('/', async (req, res) => {
 router.post('/', async (req, res) => {
   try {
     const { profileId } = getAuth(req);
-    const { title, documentType } = req.body;
+    const { title, documentType, folderId } = req.body;
 
     const [project] = await db
       .insert(projects)
       .values({
         userId: profileId,
-        title: title || 'Untitled Project',
+        title: title || 'Untitled Document',
         documentType: (documentType || 'rfp').toLowerCase(),
+        folderId: folderId || null,
         phase: 'intake',
         status: 'in_progress',
       })
@@ -64,6 +73,7 @@ router.post('/', async (req, res) => {
       status: 'draft',
       documentType: (project.documentType || 'rfp').toUpperCase(),
       phase: mapPhaseToFrontend(project.phase),
+      folderId: project.folderId || null,
       createdAt: new Date(project.createdAt).getTime(),
       updatedAt: new Date(project.updatedAt).getTime(),
     });
@@ -107,6 +117,7 @@ router.get('/:id', async (req, res) => {
         status: project.status === 'generated' || project.status === 'exported' ? 'completed' : 'draft',
         documentType: (project.documentType || 'rfp').toUpperCase(),
         phase: mapPhaseToFrontend(project.phase),
+        folderId: project.folderId || null,
         createdAt: new Date(project.createdAt).getTime(),
         updatedAt: new Date(project.updatedAt).getTime(),
         briefData: project.briefData,
@@ -165,6 +176,7 @@ router.patch('/:id', async (req, res) => {
     if (updates.planningMessages !== undefined) dbUpdates.planningMessages = updates.planningMessages;
     if (updates.fileContext !== undefined) dbUpdates.fileContext = updates.fileContext;
     if (updates.model !== undefined) dbUpdates.model = updates.model;
+    if (updates.folderId !== undefined) dbUpdates.folderId = updates.folderId || null;
     dbUpdates.updatedAt = new Date();
 
     const [updated] = await db
@@ -183,6 +195,7 @@ router.patch('/:id', async (req, res) => {
       status: updated.status === 'generated' || updated.status === 'exported' ? 'completed' : 'draft',
       documentType: (updated.documentType || 'rfp').toUpperCase(),
       phase: mapPhaseToFrontend(updated.phase),
+      folderId: updated.folderId || null,
       createdAt: new Date(updated.createdAt).getTime(),
       updatedAt: new Date(updated.updatedAt).getTime(),
     });

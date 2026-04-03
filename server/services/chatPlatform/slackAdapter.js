@@ -140,3 +140,5 @@ module.exports = {
   projectUrl,
   downloadSlackFile,
 };
+// NOTE: Only formatAuthLink and downloadSlackFile are currently imported.
+// Other exports are available for deep-link features (Phase 3).

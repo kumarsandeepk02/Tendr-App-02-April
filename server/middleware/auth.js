@@ -175,4 +175,4 @@ function getAuth(req) {
   return req.auth;
 }
 
-module.exports = { authMiddleware, getAuth, resolveProfile };
+module.exports = { authMiddleware, getAuth, resolveProfile, decodeJwtPayload };

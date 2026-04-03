@@ -147,7 +147,28 @@ const teamInvitations = pgTable(
   ]
 );
 
-// ── Projects ────────────────────────────────────────────────────────────────
+// ── Project Folders (what users call "Projects" — organizational grouping) ──
+const projectFolders = pgTable(
+  'project_folders',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => profiles.id, { onDelete: 'cascade' }),
+    teamId: uuid('team_id').references(() => teams.id, { onDelete: 'set null' }),
+    name: text('name').notNull(),
+    description: text('description'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_project_folders_user').on(table.userId),
+    index('idx_project_folders_team').on(table.teamId),
+    index('idx_project_folders_updated').on(table.updatedAt),
+  ]
+);
+
+// ── Projects (individual documents — RFPs, RFIs, brainstorms) ──────────────
 const projects = pgTable(
   'projects',
   {
@@ -156,7 +177,8 @@ const projects = pgTable(
       .notNull()
       .references(() => profiles.id, { onDelete: 'cascade' }),
     teamId: uuid('team_id').references(() => teams.id, { onDelete: 'set null' }),
-    title: text('title').notNull().default('Untitled Project'),
+    folderId: uuid('folder_id').references(() => projectFolders.id, { onDelete: 'set null' }),
+    title: text('title').notNull().default('Untitled Document'),
     documentType: documentTypeEnum('document_type').default('rfp'),
     phase: v2PhaseEnum('phase').default('intake'),
     status: projectStatusEnum('status').default('in_progress'),
@@ -170,6 +192,7 @@ const projects = pgTable(
   (table) => [
     index('idx_projects_user').on(table.userId),
     index('idx_projects_team').on(table.teamId),
+    index('idx_projects_folder').on(table.folderId),
     index('idx_projects_updated').on(table.updatedAt),
   ]
 );
@@ -405,6 +428,7 @@ module.exports = {
   teams,
   teamMemberships,
   teamInvitations,
+  projectFolders,
   projects,
   documentSections,
   documentVersions,

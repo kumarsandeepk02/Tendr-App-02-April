@@ -34,13 +34,11 @@ async function runAsync({ projectId, brief, project, onStart, onDone, onError })
         },
         onDone: async () => {
           try {
-            // Save sections — sequential ops instead of transaction
+            // Save sections — insert first, then delete old ones.
+            // This order prevents data loss if the insert fails.
             if (completedSections.length > 0) {
-              // Delete existing sections first
-              await db.delete(documentSections).where(eq(documentSections.projectId, projectId));
-
               // Insert new sections
-              await db.insert(documentSections).values(
+              const inserted = await db.insert(documentSections).values(
                 completedSections.map((s, i) => ({
                   projectId,
                   title: s.title,
@@ -48,7 +46,18 @@ async function runAsync({ projectId, brief, project, onStart, onDone, onError })
                   sectionType: 'informational',
                   order: i,
                 }))
-              );
+              ).returning({ id: documentSections.id });
+
+              // Only delete old sections after insert succeeds
+              const newIds = inserted.map(r => r.id);
+              const allSections = await db.select({ id: documentSections.id })
+                .from(documentSections)
+                .where(eq(documentSections.projectId, projectId));
+
+              const oldIds = allSections.filter(s => !newIds.includes(s.id)).map(s => s.id);
+              for (const oldId of oldIds) {
+                await db.delete(documentSections).where(eq(documentSections.id, oldId));
+              }
             }
 
             // Update project phase to done

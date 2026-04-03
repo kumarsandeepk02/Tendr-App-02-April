@@ -3,9 +3,11 @@ import { V2Phase } from './types';
 import { useChatV2 } from './hooks/useChatV2';
 import { useDocument } from './hooks/useDocument';
 import { useProjects } from './hooks/useProjects';
+import { useFolders } from './hooks/useFolders';
 import DocumentPreview from './components/DocumentPreview';
 import Toolbar from './components/Toolbar';
 import Sidebar from './components/Sidebar';
+import CreateDialog from './components/CreateDialog';
 import FeedbackToast from './components/FeedbackToast';
 import LandingPage from './components/v2/LandingPage';
 import PlanningChat from './components/v2/PlanningChat';
@@ -31,7 +33,16 @@ function App() {
     localStorage.setItem('rfp_sidebar_collapsed', String(sidebarCollapsed));
   }, [sidebarCollapsed]);
 
-  // Projects
+  // Folders (what users call "Projects")
+  const {
+    folders,
+    createFolder,
+    updateFolder,
+    deleteFolder: deleteFolderApi,
+    refreshFolders,
+  } = useFolders();
+
+  // Documents (what the code calls "projects")
   const {
     projects,
     activeProjectId,
@@ -39,7 +50,12 @@ function App() {
     switchProject,
     deleteProject,
     syncProjectMeta,
+    moveDocument,
   } = useProjects();
+
+  // Creation dialog state
+  const [createDialogMode, setCreateDialogMode] = useState<'folder' | 'document' | null>(null);
+  const [createDialogPresets, setCreateDialogPresets] = useState<{ docType?: string; folderId?: string }>({});
 
   // Document state
   const {
@@ -176,12 +192,47 @@ function App() {
     }
   }, [phase, isGenerating, isStreaming]);
 
+  // Open "New Project" (folder) dialog
   const handleNewProject = useCallback(() => {
-    createProject();
+    setCreateDialogMode('folder');
+    setCreateDialogPresets({});
+  }, []);
+
+  // Open "New Document" dialog, optionally pre-selecting a folder
+  const handleNewDocument = useCallback((folderId?: string) => {
+    setCreateDialogMode('document');
+    setCreateDialogPresets({ folderId });
+  }, []);
+
+  // Called from LandingPage agent cards — opens naming dialog with doc type preset
+  const handleStartDocument = useCallback((docType: 'RFP' | 'RFI' | 'brainstorm') => {
+    setCreateDialogMode('document');
+    setCreateDialogPresets({ docType });
+  }, []);
+
+  // Dialog callbacks
+  const handleCreateFolder = useCallback(async (name: string, description?: string) => {
+    await createFolder(name, description);
+  }, [createFolder]);
+
+  const handleCreateDocument = useCallback((title: string, documentType: string, folderId?: string) => {
+    createProject({ title, documentType, folderId });
     resetChat();
     resetDocument();
     setIsFullPageEdit(false);
-  }, [createProject, resetChat, resetDocument]);
+    // Start planning with the selected doc type
+    setTimeout(() => startPlanning(documentType as any), 100);
+  }, [createProject, resetChat, resetDocument, startPlanning]);
+
+  const handleDeleteFolder = useCallback((folderId: string) => {
+    if (!window.confirm('Delete this project folder? Documents inside will become standalone.')) return;
+    deleteFolderApi(folderId);
+    refreshFolders();
+  }, [deleteFolderApi, refreshFolders]);
+
+  const handleRenameFolder = useCallback((folderId: string, newName: string) => {
+    updateFolder(folderId, { name: newName });
+  }, [updateFolder]);
 
   const handleSelectProject = useCallback(
     (targetId: string) => {
@@ -245,6 +296,7 @@ function App() {
             onStartRFP={() => startPlanning('RFP')}
             onStartRFI={() => startPlanning('RFI')}
             onStartFreeform={() => startPlanning()}
+            onStartDocument={handleStartDocument}
           />
         );
       case 'planning':
@@ -338,13 +390,17 @@ function App() {
         {/* Sidebar */}
         <Sidebar
           projects={projects}
+          folders={folders}
           activeProjectId={activeProjectId}
           isCollapsed={sidebarCollapsed}
           isGenerating={isGenerating || isStreaming}
           onToggleCollapse={() => setSidebarCollapsed((c) => !c)}
           onSelectProject={handleSelectProject}
           onNewProject={handleNewProject}
+          onNewDocument={handleNewDocument}
           onDeleteProject={handleDeleteProject}
+          onDeleteFolder={handleDeleteFolder}
+          onRenameFolder={handleRenameFolder}
         />
 
         {/* Left Panel: Landing / Planning Chat / Brief Review / Generation Narrator */}
@@ -401,6 +457,18 @@ function App() {
           </div>
         )}
       </div>
+
+      {/* Create Dialog */}
+      <CreateDialog
+        isOpen={createDialogMode !== null}
+        onClose={() => setCreateDialogMode(null)}
+        mode={createDialogMode || 'document'}
+        folders={folders}
+        preselectedDocType={createDialogPresets.docType}
+        preselectedFolderId={createDialogPresets.folderId}
+        onCreateFolder={handleCreateFolder}
+        onCreateDocument={handleCreateDocument}
+      />
 
       {/* Persistent floating chat — available during generation & done phases */}
       <PersistentChat

@@ -1,7 +1,7 @@
 const express = require('express');
 const crypto = require('crypto');
 const { WorkOS } = require('@workos-inc/node');
-const { authMiddleware, getAuth } = require('../middleware/auth');
+const { authMiddleware, getAuth, resolveProfile, decodeJwtPayload } = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -140,12 +140,9 @@ router.get('/callback', async (req, res) => {
     // ── Link Slack identity if this auth was triggered from Penny ────
     if (stateData.linkSlack && stateData.slackWorkspaceId) {
       try {
-        const { resolveProfile } = require('../middleware/auth');
         const { linkExternalIdentity } = require('../services/chatPlatform/userResolver');
 
-        // Decode JWT to get user ID
-        const parts = result.accessToken.split('.');
-        const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+        const payload = decodeJwtPayload(result.accessToken);
         const profile = await resolveProfile(payload.sub, {
           fullName: `${result.user?.firstName || ''} ${result.user?.lastName || ''}`.trim(),
         });
