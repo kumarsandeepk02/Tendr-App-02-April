@@ -57,6 +57,8 @@ const usageEventTypeEnum = pgEnum('usage_event_type', [
   'file_uploaded',
 ]);
 
+const chatPlatformEnum = pgEnum('chat_platform', ['slack', 'teams']);
+
 // ── Profiles ────────────────────────────────────────────────────────────────
 const profiles = pgTable('profiles', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -342,6 +344,53 @@ const auditLogs = pgTable(
   ]
 );
 
+// ── External Identities (Slack/Teams → Tendr profile) ──────────────────────
+const externalIdentities = pgTable(
+  'external_identities',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    profileId: uuid('profile_id')
+      .notNull()
+      .references(() => profiles.id, { onDelete: 'cascade' }),
+    provider: chatPlatformEnum('provider').notNull(),
+    externalUserId: varchar('external_user_id', { length: 255 }).notNull(),
+    externalWorkspaceId: varchar('external_workspace_id', { length: 255 }).notNull(),
+    accessToken: text('access_token'),
+    metadata: jsonb('metadata').default(sql`'{}'::jsonb`),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('uq_external_identity').on(table.provider, table.externalUserId, table.externalWorkspaceId),
+    index('idx_external_identities_profile').on(table.profileId),
+  ]
+);
+
+// ── Chat Conversations (Slack/Teams thread → project) ──────────────────────
+const chatConversations = pgTable(
+  'chat_conversations',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    platform: chatPlatformEnum('platform').notNull(),
+    channelId: varchar('channel_id', { length: 255 }).notNull(),
+    threadId: varchar('thread_id', { length: 255 }).notNull(),
+    projectId: uuid('project_id').references(() => projects.id, { onDelete: 'set null' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => profiles.id, { onDelete: 'cascade' }),
+    phase: v2PhaseEnum('phase').default('intake'),
+    lastActivity: timestamp('last_activity', { withTimezone: true }).defaultNow().notNull(),
+    metadata: jsonb('metadata').default(sql`'{}'::jsonb`),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('uq_chat_conversation').on(table.platform, table.channelId, table.threadId),
+    index('idx_chat_conversations_user').on(table.userId, table.lastActivity),
+    index('idx_chat_conversations_project').on(table.projectId),
+  ]
+);
+
 module.exports = {
   // Enums
   documentTypeEnum,
@@ -350,6 +399,7 @@ module.exports = {
   teamRoleEnum,
   invitationStatusEnum,
   usageEventTypeEnum,
+  chatPlatformEnum,
   // Tables
   profiles,
   teams,
@@ -364,4 +414,6 @@ module.exports = {
   uploadedFiles,
   usageEvents,
   auditLogs,
+  externalIdentities,
+  chatConversations,
 };

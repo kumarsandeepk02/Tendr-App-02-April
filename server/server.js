@@ -24,6 +24,16 @@ const projectRoutes = require('./routes/projects');
 const { authMiddleware } = require('./middleware/auth');
 const { promptDefenseMiddleware } = require('./services/security/promptDefense');
 
+// Slack integration (loaded if signing secret is set — bot token comes after OAuth install)
+let slackRouter = null;
+if (process.env.SLACK_SIGNING_SECRET) {
+  const { slackRouter: router } = require('./routes/slack');
+  slackRouter = router;
+  console.log('Slack integration enabled' + (process.env.SLACK_BOT_TOKEN?.startsWith('xoxb-') ? '' : ' (bot token not yet configured — OAuth install available)'));
+} else {
+  console.log('Slack integration disabled (SLACK_SIGNING_SECRET not set)');
+}
+
 const app = express();
 const PORT = process.env.PORT || 3001;
 const IS_PROD = process.env.NODE_ENV === 'production';
@@ -53,6 +63,11 @@ app.use(cors({
   },
   credentials: true,
 }));
+
+// ── Slack routes (BEFORE express.json — needs raw body for signature verification)
+if (slackRouter) {
+  app.use('/api/slack', slackRouter);
+}
 
 app.use(express.json({ limit: '10mb' }));
 app.use(cookieParser(process.env.SESSION_SECRET));
