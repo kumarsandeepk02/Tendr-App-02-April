@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { getSessionToken, setSessionToken, clearSessionToken } from '../utils/api';
 
-// Same-origin in production (Vercel proxy), local server in dev.
-const API_URL = process.env.REACT_APP_API_URL ?? 'http://localhost:3001';
+// In production, Vercel proxy rewrites /api/* — use relative paths (empty string).
+// In dev, REACT_APP_API_URL=http://localhost:3001 from .env.
+const API_URL = process.env.REACT_APP_API_URL || '';
 
 interface UserProfile {
   id: string;
