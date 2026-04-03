@@ -94,8 +94,14 @@ async function authMiddleware(req, res, next) {
       return res.status(503).json({ error: 'Authentication service not configured' });
     }
 
-    // ── Read token from signed session cookie ────────────────────────────
-    const token = req.signedCookies?.tendr_session;
+    // ── Read token from Authorization header (primary) or cookie (fallback)
+    const authHeader = req.headers.authorization;
+    let token;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      token = authHeader.slice(7);
+    } else {
+      token = req.signedCookies?.tendr_session;
+    }
     if (!token) {
       return res.status(401).json({ error: 'Missing session' });
     }

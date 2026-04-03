@@ -1,13 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
+import { getSessionToken, setSessionToken, clearSessionToken } from '../utils/api';
 
-// In production: empty string → same-origin (Vercel proxies /api/* to App Runner).
-// In dev: hit local server directly.
+// Same-origin in production (Vercel proxy), local server in dev.
 const API_URL = process.env.REACT_APP_API_URL ?? 'http://localhost:3001';
-
-// Direct URL to App Runner for cookie-setting requests.
-// Vercel proxy strips Set-Cookie headers, so auth exchange + session
-// calls must go directly to the backend.
-const DIRECT_API_URL = process.env.REACT_APP_DIRECT_API_URL || API_URL;
 
 interface UserProfile {
   id: string;
@@ -36,7 +31,7 @@ export function useAuth() {
     checkSession();
   }, []);
 
-  // Handle auth callback — exchange code for session cookie
+  // Handle auth callback — exchange code for session token
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const exchangeCode = params.get('exchange_code');
@@ -44,15 +39,18 @@ export function useAuth() {
 
     if (path === '/auth/callback' && exchangeCode) {
       window.history.replaceState({}, '', '/');
-      // Exchange the one-time code for a session cookie (direct to backend)
-      fetch(`${DIRECT_API_URL}/api/auth/exchange`, {
+      // Exchange the one-time code for a session token (through Vercel proxy)
+      fetch(`${API_URL}/api/auth/exchange`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
         body: JSON.stringify({ exchange_code: exchangeCode }),
       })
-        .then((res) => {
+        .then(async (res) => {
           if (res.ok) {
+            const data = await res.json();
+            if (data.token) {
+              setSessionToken(data.token);
+            }
             checkSession();
           } else {
             setAuth({ isAuthenticated: false, isLoading: false, profile: null });
@@ -69,9 +67,14 @@ export function useAuth() {
   }, []);
 
   async function checkSession() {
+    const token = getSessionToken();
+    if (!token) {
+      setAuth({ isAuthenticated: false, isLoading: false, profile: null });
+      return;
+    }
     try {
-      const res = await fetch(`${DIRECT_API_URL}/api/auth/me`, {
-        credentials: 'include',
+      const res = await fetch(`${API_URL}/api/auth/me`, {
+        headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
         const data = await res.json();
@@ -81,6 +84,7 @@ export function useAuth() {
           profile: data.profile,
         });
       } else {
+        clearSessionToken();
         setAuth({ isAuthenticated: false, isLoading: false, profile: null });
       }
     } catch {
@@ -90,9 +94,7 @@ export function useAuth() {
 
   const login = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/api/auth/login`, {
-        credentials: 'include',
-      });
+      const res = await fetch(`${API_URL}/api/auth/login`);
       const data = await res.json();
 
       if (data.dev) {
@@ -110,13 +112,15 @@ export function useAuth() {
 
   const logout = useCallback(async () => {
     try {
-      await fetch(`${DIRECT_API_URL}/api/auth/logout`, {
+      const token = getSessionToken();
+      await fetch(`${API_URL}/api/auth/logout`, {
         method: 'POST',
-        credentials: 'include',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
     } catch {
       // Best-effort
     }
+    clearSessionToken();
     localStorage.removeItem('tendr_token');
     localStorage.removeItem('tendr_profile');
     localStorage.removeItem('tendr_user');
@@ -131,7 +135,7 @@ export function useAuth() {
 }
 
 /**
- * Returns empty headers — auth is now handled by session cookies.
+ * Returns empty headers — auth is handled by the api.ts interceptor.
  */
 export function getAuthHeaders(): Record<string, string> {
   return {};

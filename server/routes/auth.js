@@ -160,8 +160,10 @@ router.post('/exchange', (req, res) => {
     return res.status(401).json({ error: 'Exchange code expired' });
   }
 
+  // Set cookie (works in same-origin/local dev) and return token in body
+  // (for cross-origin prod where Vercel proxy strips Set-Cookie headers).
   res.cookie('tendr_session', entry.accessToken, sessionCookieOptions());
-  res.json({ success: true });
+  res.json({ success: true, token: entry.accessToken });
 });
 
 /**
