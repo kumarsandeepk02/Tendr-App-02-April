@@ -6,56 +6,47 @@ const { eq, and, desc, count } = require('drizzle-orm');
 
 const router = express.Router();
 
-/**
- * GET /api/folders
- * List all folders for the authenticated user with document counts.
- */
 router.get('/', async (req, res) => {
   try {
-    const { profileId } = getAuth(req);
+    const { profileId, tenantId } = getAuth(req);
+
+    const conditions = [eq(projectFolders.userId, profileId)];
+    if (tenantId) conditions.push(eq(projectFolders.tenantId, tenantId));
 
     const rows = await db
       .select()
       .from(projectFolders)
-      .where(eq(projectFolders.userId, profileId))
+      .where(and(...conditions))
       .orderBy(desc(projectFolders.updatedAt));
 
-    // Get document counts per folder
-    const folderIds = rows.map((f) => f.id);
     const counts = {};
-    if (folderIds.length > 0) {
-      for (const folderId of folderIds) {
-        const [result] = await db
-          .select({ count: count() })
-          .from(projects)
-          .where(eq(projects.folderId, folderId));
-        counts[folderId] = Number(result?.count || 0);
-      }
+    for (const folder of rows) {
+      const [result] = await db
+        .select({ count: count() })
+        .from(projects)
+        .where(eq(projects.folderId, folder.id));
+      counts[folder.id] = Number(result?.count || 0);
     }
 
-    const result = rows.map((f) => ({
-      id: f.id,
-      name: f.name,
-      description: f.description,
-      documentCount: counts[f.id] || 0,
-      createdAt: new Date(f.createdAt).getTime(),
-      updatedAt: new Date(f.updatedAt).getTime(),
-    }));
-
-    res.json({ folders: result });
+    res.json({
+      folders: rows.map((f) => ({
+        id: f.id,
+        name: f.name,
+        description: f.description,
+        documentCount: counts[f.id] || 0,
+        createdAt: new Date(f.createdAt).getTime(),
+        updatedAt: new Date(f.updatedAt).getTime(),
+      })),
+    });
   } catch (error) {
     console.error('List folders error:', error);
     res.status(500).json({ error: 'Failed to load folders' });
   }
 });
 
-/**
- * POST /api/folders
- * Create a new folder.
- */
 router.post('/', async (req, res) => {
   try {
-    const { profileId } = getAuth(req);
+    const { profileId, tenantId } = getAuth(req);
     const { name, description } = req.body;
 
     if (!name || !name.trim()) {
@@ -66,6 +57,7 @@ router.post('/', async (req, res) => {
       .insert(projectFolders)
       .values({
         userId: profileId,
+        tenantId: tenantId || null,
         name: name.trim(),
         description: description?.trim() || null,
       })
@@ -85,24 +77,21 @@ router.post('/', async (req, res) => {
   }
 });
 
-/**
- * GET /api/folders/:id
- * Get a single folder with its documents.
- */
 router.get('/:id', async (req, res) => {
   try {
-    const { profileId } = getAuth(req);
+    const { profileId, tenantId } = getAuth(req);
     const { id } = req.params;
+
+    const conditions = [eq(projectFolders.id, id), eq(projectFolders.userId, profileId)];
+    if (tenantId) conditions.push(eq(projectFolders.tenantId, tenantId));
 
     const [folder] = await db
       .select()
       .from(projectFolders)
-      .where(and(eq(projectFolders.id, id), eq(projectFolders.userId, profileId)))
+      .where(and(...conditions))
       .limit(1);
 
-    if (!folder) {
-      return res.status(404).json({ error: 'Folder not found' });
-    }
+    if (!folder) return res.status(404).json({ error: 'Folder not found' });
 
     const docs = await db
       .select()
@@ -124,7 +113,6 @@ router.get('/:id', async (req, res) => {
         title: p.title,
         status: p.status === 'generated' || p.status === 'exported' ? 'completed' : 'draft',
         documentType: (p.documentType || 'rfp').toUpperCase(),
-        phase: mapPhaseToFrontend(p.phase),
         folderId: p.folderId,
         createdAt: new Date(p.createdAt).getTime(),
         updatedAt: new Date(p.updatedAt).getTime(),
@@ -136,13 +124,9 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-/**
- * PATCH /api/folders/:id
- * Update folder name/description.
- */
 router.patch('/:id', async (req, res) => {
   try {
-    const { profileId } = getAuth(req);
+    const { profileId, tenantId } = getAuth(req);
     const { id } = req.params;
     const { name, description } = req.body;
 
@@ -153,15 +137,16 @@ router.patch('/:id', async (req, res) => {
     }
     if (description !== undefined) updates.description = description?.trim() || null;
 
+    const conditions = [eq(projectFolders.id, id), eq(projectFolders.userId, profileId)];
+    if (tenantId) conditions.push(eq(projectFolders.tenantId, tenantId));
+
     const [updated] = await db
       .update(projectFolders)
       .set(updates)
-      .where(and(eq(projectFolders.id, id), eq(projectFolders.userId, profileId)))
+      .where(and(...conditions))
       .returning();
 
-    if (!updated) {
-      return res.status(404).json({ error: 'Folder not found' });
-    }
+    if (!updated) return res.status(404).json({ error: 'Folder not found' });
 
     res.json({
       id: updated.id,
@@ -176,23 +161,20 @@ router.patch('/:id', async (req, res) => {
   }
 });
 
-/**
- * DELETE /api/folders/:id
- * Delete a folder. Documents inside become standalone (folderId → null via FK constraint).
- */
 router.delete('/:id', async (req, res) => {
   try {
-    const { profileId } = getAuth(req);
+    const { profileId, tenantId } = getAuth(req);
     const { id } = req.params;
+
+    const conditions = [eq(projectFolders.id, id), eq(projectFolders.userId, profileId)];
+    if (tenantId) conditions.push(eq(projectFolders.tenantId, tenantId));
 
     const [deleted] = await db
       .delete(projectFolders)
-      .where(and(eq(projectFolders.id, id), eq(projectFolders.userId, profileId)))
+      .where(and(...conditions))
       .returning({ id: projectFolders.id });
 
-    if (!deleted) {
-      return res.status(404).json({ error: 'Folder not found' });
-    }
+    if (!deleted) return res.status(404).json({ error: 'Folder not found' });
 
     res.json({ success: true });
   } catch (error) {
@@ -200,22 +182,5 @@ router.delete('/:id', async (req, res) => {
     res.status(500).json({ error: 'Failed to delete folder' });
   }
 });
-
-// Reuse the same phase mapping from projects route
-function mapPhaseToFrontend(dbPhase) {
-  const map = {
-    intake: 'questions',
-    scope_lock: 'questions',
-    requirements: 'questions',
-    eval_pricing: 'questions',
-    question_design: 'questions',
-    exploring: 'questions',
-    readiness: 'outline_review',
-    generating: 'generating',
-    handoff: 'questions',
-    done: 'done',
-  };
-  return map[dbPhase] || 'questions';
-}
 
 module.exports = router;

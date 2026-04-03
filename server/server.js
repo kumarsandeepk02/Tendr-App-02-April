@@ -22,7 +22,9 @@ const uploadRoutes = require('./routes/upload');
 const authRoutes = require('./routes/auth');
 const projectRoutes = require('./routes/projects');
 const folderRoutes = require('./routes/folders');
+const adminRoutes = require('./routes/admin');
 const { authMiddleware } = require('./middleware/auth');
+const { tenantMiddleware, adminRoleCheck } = require('./middleware/tenant');
 const { promptDefenseMiddleware } = require('./services/security/promptDefense');
 
 // Slack integration (loaded if signing secret is set — bot token comes after OAuth install)
@@ -106,10 +108,13 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: Date.now() });
 });
 
-// ── Protected routes — auth required ────────────────────────────────────────
-app.use('/api/folders', authMiddleware, folderRoutes);
-app.use('/api/projects', authMiddleware, projectRoutes);
-app.use('/api/upload', authMiddleware, uploadRoutes);
+// ── Admin routes — auth + tenant + admin role ──────────────────────────────
+app.use('/api/admin', authMiddleware, tenantMiddleware, adminRoleCheck, adminRoutes);
+
+// ── Protected routes — auth + tenant required ──────────────────────────────
+app.use('/api/folders', authMiddleware, tenantMiddleware, folderRoutes);
+app.use('/api/projects', authMiddleware, tenantMiddleware, projectRoutes);
+app.use('/api/upload', authMiddleware, tenantMiddleware, uploadRoutes);
 
 // AI rate limit on heavy endpoints — MUST be mounted before chat routes
 app.use('/api/chat/v2/pipeline', aiLimiter);
@@ -120,7 +125,7 @@ app.use('/api/chat/regenerate-section', aiLimiter);
 app.use('/api/chat/pipeline', aiLimiter);
 
 // Chat routes: auth + prompt defense
-app.use('/api/chat', authMiddleware, promptDefenseMiddleware, chatRoutes);
+app.use('/api/chat', authMiddleware, tenantMiddleware, promptDefenseMiddleware, chatRoutes);
 
 // ── Start ───────────────────────────────────────────────────────────────────
 app.listen(PORT, () => {

@@ -8,14 +8,13 @@ const router = express.Router();
 
 /**
  * GET /api/projects
- * List all projects for the authenticated user, sorted by most recently updated.
  */
 router.get('/', async (req, res) => {
   try {
-    const { profileId } = getAuth(req);
+    const { profileId, tenantId } = getAuth(req);
 
-    // Optional folderId filter: ?folderId=none (standalone) or ?folderId=<uuid>
     const conditions = [eq(projects.userId, profileId)];
+    if (tenantId) conditions.push(eq(projects.tenantId, tenantId));
     if (req.query.folderId === 'none') {
       conditions.push(isNull(projects.folderId));
     } else if (req.query.folderId) {
@@ -48,17 +47,17 @@ router.get('/', async (req, res) => {
 
 /**
  * POST /api/projects
- * Create a new project.
  */
 router.post('/', async (req, res) => {
   try {
-    const { profileId } = getAuth(req);
+    const { profileId, tenantId } = getAuth(req);
     const { title, documentType, folderId } = req.body;
 
     const [project] = await db
       .insert(projects)
       .values({
         userId: profileId,
+        tenantId: tenantId || null,
         title: title || 'Untitled Document',
         documentType: (documentType || 'rfp').toLowerCase(),
         folderId: folderId || null,
@@ -85,24 +84,25 @@ router.post('/', async (req, res) => {
 
 /**
  * GET /api/projects/:id
- * Get a single project with its full state (sections, review, intel, etc).
  */
 router.get('/:id', async (req, res) => {
   try {
-    const { profileId } = getAuth(req);
+    const { profileId, tenantId } = getAuth(req);
     const { id } = req.params;
+
+    const conditions = [eq(projects.id, id), eq(projects.userId, profileId)];
+    if (tenantId) conditions.push(eq(projects.tenantId, tenantId));
 
     const [project] = await db
       .select()
       .from(projects)
-      .where(and(eq(projects.id, id), eq(projects.userId, profileId)))
+      .where(and(...conditions))
       .limit(1);
 
     if (!project) {
       return res.status(404).json({ error: 'Project not found' });
     }
 
-    // Fetch related data in parallel
     const [sections, reviews, intel, analyses] = await Promise.all([
       db.select().from(documentSections).where(eq(documentSections.projectId, id)).orderBy(documentSections.order),
       db.select().from(qualityReviews).where(eq(qualityReviews.projectId, id)).orderBy(desc(qualityReviews.createdAt)).limit(1),
@@ -158,15 +158,13 @@ router.get('/:id', async (req, res) => {
 
 /**
  * PATCH /api/projects/:id
- * Update project metadata (title, phase, status, brief, messages, etc).
  */
 router.patch('/:id', async (req, res) => {
   try {
-    const { profileId } = getAuth(req);
+    const { profileId, tenantId } = getAuth(req);
     const { id } = req.params;
     const updates = req.body;
 
-    // Build safe update object
     const dbUpdates = {};
     if (updates.title !== undefined) dbUpdates.title = updates.title;
     if (updates.documentType !== undefined) dbUpdates.documentType = updates.documentType.toLowerCase();
@@ -179,10 +177,13 @@ router.patch('/:id', async (req, res) => {
     if (updates.folderId !== undefined) dbUpdates.folderId = updates.folderId || null;
     dbUpdates.updatedAt = new Date();
 
+    const conditions = [eq(projects.id, id), eq(projects.userId, profileId)];
+    if (tenantId) conditions.push(eq(projects.tenantId, tenantId));
+
     const [updated] = await db
       .update(projects)
       .set(dbUpdates)
-      .where(and(eq(projects.id, id), eq(projects.userId, profileId)))
+      .where(and(...conditions))
       .returning();
 
     if (!updated) {
@@ -207,16 +208,18 @@ router.patch('/:id', async (req, res) => {
 
 /**
  * DELETE /api/projects/:id
- * Delete a project and all its data (cascades).
  */
 router.delete('/:id', async (req, res) => {
   try {
-    const { profileId } = getAuth(req);
+    const { profileId, tenantId } = getAuth(req);
     const { id } = req.params;
+
+    const conditions = [eq(projects.id, id), eq(projects.userId, profileId)];
+    if (tenantId) conditions.push(eq(projects.tenantId, tenantId));
 
     const [deleted] = await db
       .delete(projects)
-      .where(and(eq(projects.id, id), eq(projects.userId, profileId)))
+      .where(and(...conditions))
       .returning({ id: projects.id });
 
     if (!deleted) {
@@ -232,19 +235,20 @@ router.delete('/:id', async (req, res) => {
 
 /**
  * PATCH /api/projects/:id/sections
- * Bulk upsert sections for a project (used during auto-save).
  */
 router.patch('/:id/sections', async (req, res) => {
   try {
-    const { profileId } = getAuth(req);
+    const { profileId, tenantId } = getAuth(req);
     const { id } = req.params;
     const { sections: sectionData } = req.body;
 
-    // Verify ownership
+    const conditions = [eq(projects.id, id), eq(projects.userId, profileId)];
+    if (tenantId) conditions.push(eq(projects.tenantId, tenantId));
+
     const [project] = await db
       .select({ id: projects.id })
       .from(projects)
-      .where(and(eq(projects.id, id), eq(projects.userId, profileId)))
+      .where(and(...conditions))
       .limit(1);
 
     if (!project) {
@@ -255,7 +259,6 @@ router.patch('/:id/sections', async (req, res) => {
       return res.status(400).json({ error: 'sections must be an array' });
     }
 
-    // Atomic: delete + insert + timestamp in a single transaction
     await db.transaction(async (tx) => {
       await tx.delete(documentSections).where(eq(documentSections.projectId, id));
 
@@ -282,8 +285,6 @@ router.patch('/:id/sections', async (req, res) => {
 });
 
 // ── Phase mapping helpers ───────────────────────────────────────────────────
-// Frontend uses: 'questions' | 'outline_review' | 'generating' | 'done'
-// Backend uses: 'intake' | 'scope_lock' | 'requirements' | ... | 'generating' | 'done'
 
 function mapPhaseToFrontend(dbPhase) {
   const map = {
@@ -307,7 +308,6 @@ function mapPhaseToBackend(frontendPhase) {
     outline_review: 'readiness',
     generating: 'generating',
     done: 'done',
-    // V2 phases pass through
     landing: 'intake',
     planning: 'intake',
     brief: 'readiness',
