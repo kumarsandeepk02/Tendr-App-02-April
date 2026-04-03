@@ -61,10 +61,30 @@ function verifySlackSignature(req, res, next) {
 }
 
 /**
- * Middleware to capture raw body for signature verification.
- * Must run before JSON parsing on Slack event routes.
+ * Express middleware to parse raw body for Slack signature verification.
+ * Uses express.raw() to get the buffer, then parses JSON/URL-encoded.
  */
+const rawBodyParser = express.raw({ type: '*/*', limit: '5mb' });
+
 function captureRawBody(req, res, next) {
+  // If body is already a Buffer (from express.raw), use it
+  if (Buffer.isBuffer(req.body)) {
+    req.rawBody = req.body.toString('utf8');
+    try {
+      req.body = JSON.parse(req.rawBody);
+    } catch {
+      req.body = Object.fromEntries(new URLSearchParams(req.rawBody));
+    }
+    return next();
+  }
+
+  // If body is already parsed (e.g. by proxy), reconstruct raw string
+  if (req.body && typeof req.body === 'object') {
+    req.rawBody = JSON.stringify(req.body);
+    return next();
+  }
+
+  // Fallback: read stream manually
   let data = '';
   req.setEncoding('utf8');
   req.on('data', (chunk) => { data += chunk; });
@@ -73,7 +93,6 @@ function captureRawBody(req, res, next) {
     try {
       req.body = JSON.parse(data);
     } catch {
-      // For URL-encoded payloads (slash commands, interactivity)
       req.body = Object.fromEntries(new URLSearchParams(data));
     }
     next();
@@ -199,7 +218,7 @@ router.get('/oauth/callback', async (req, res) => {
 // Event API (POST — requires signature verification + raw body)
 // ═══════════════════════════════════════════════════════════════════════════
 
-router.post('/events', captureRawBody, verifySlackSignature, async (req, res) => {
+router.post('/events', rawBodyParser, captureRawBody, verifySlackSignature, async (req, res) => {
   const body = req.body;
 
   // URL verification challenge (Slack sends this on initial setup)
@@ -231,7 +250,7 @@ router.post('/events', captureRawBody, verifySlackSignature, async (req, res) =>
 // Slash Commands (POST — URL-encoded body)
 // ═══════════════════════════════════════════════════════════════════════════
 
-router.post('/commands', captureRawBody, verifySlackSignature, async (req, res) => {
+router.post('/commands', rawBodyParser, captureRawBody, verifySlackSignature, async (req, res) => {
   // Acknowledge immediately
   res.status(200).send();
 
