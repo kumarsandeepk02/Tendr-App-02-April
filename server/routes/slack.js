@@ -1,11 +1,8 @@
 /**
  * Slack Routes — plain Express router with manual signature verification.
  *
- * Handles:
- * - Slack OAuth install + callback
- * - Slack event API (messages, mentions, file_shared)
- * - Slash commands (/penny)
- * - Interactivity (button clicks)
+ * DMs: flat conversation (no threads) — natural chat UX.
+ * Channel mentions: threaded — keeps channels clean.
  */
 
 const express = require('express');
@@ -32,10 +29,6 @@ function getSlackClient() {
 
 // ── Signature Verification ─────────────────────────────────────────────────
 
-/**
- * Verify that a request actually came from Slack.
- * Must be applied BEFORE express.json() parses the body (needs raw body).
- */
 function verifySlackSignature(req, res, next) {
   const signingSecret = process.env.SLACK_SIGNING_SECRET;
   if (!signingSecret) return res.status(500).send('Signing secret not configured');
@@ -44,11 +37,7 @@ function verifySlackSignature(req, res, next) {
   const slackSig = req.headers['x-slack-signature'];
 
   if (!timestamp || !slackSig) return res.status(400).send('Missing Slack headers');
-
-  // Prevent replay attacks (5 min window)
-  if (Math.abs(Date.now() / 1000 - timestamp) > 300) {
-    return res.status(400).send('Request too old');
-  }
+  if (Math.abs(Date.now() / 1000 - timestamp) > 300) return res.status(400).send('Request too old');
 
   const sigBaseString = `v0:${timestamp}:${req.rawBody}`;
   const mySignature = 'v0=' + crypto.createHmac('sha256', signingSecret).update(sigBaseString).digest('hex');
@@ -56,18 +45,12 @@ function verifySlackSignature(req, res, next) {
   if (!crypto.timingSafeEqual(Buffer.from(mySignature), Buffer.from(slackSig))) {
     return res.status(400).send('Invalid signature');
   }
-
   next();
 }
 
-/**
- * Express middleware to parse raw body for Slack signature verification.
- * Uses express.raw() to get the buffer, then parses JSON/URL-encoded.
- */
 const rawBodyParser = express.raw({ type: '*/*', limit: '5mb' });
 
 function captureRawBody(req, res, next) {
-  // If body is already a Buffer (from express.raw), use it
   if (Buffer.isBuffer(req.body)) {
     req.rawBody = req.body.toString('utf8');
     try {
@@ -77,14 +60,10 @@ function captureRawBody(req, res, next) {
     }
     return next();
   }
-
-  // If body is already parsed (e.g. by proxy), reconstruct raw string
   if (req.body && typeof req.body === 'object') {
     req.rawBody = JSON.stringify(req.body);
     return next();
   }
-
-  // Fallback: read stream manually
   let data = '';
   req.setEncoding('utf8');
   req.on('data', (chunk) => { data += chunk; });
@@ -99,8 +78,14 @@ function captureRawBody(req, res, next) {
   });
 }
 
-// ── Helper: post message to a thread ───────────────────────────────────────
-async function postToThread(channelId, threadTs, text, blocks) {
+// ── Message posting helpers ────────────────────────────────────────────────
+
+/**
+ * Post a message to Slack.
+ * - DMs: posts flat in the channel (no thread_ts) for natural conversation flow.
+ * - Channels: posts in a thread to keep the channel clean.
+ */
+async function postSlackMessage(channelId, text, blocks, { threadTs } = {}) {
   const client = getSlackClient();
   if (!client) {
     console.error('Slack client not initialized — missing valid SLACK_BOT_TOKEN');
@@ -109,9 +94,9 @@ async function postToThread(channelId, threadTs, text, blocks) {
   try {
     await client.chat.postMessage({
       channel: channelId,
-      thread_ts: threadTs,
       text,
       ...(blocks ? { blocks } : {}),
+      ...(threadTs ? { thread_ts: threadTs } : {}),
     });
   } catch (err) {
     console.error('Slack postMessage error:', err.message);
@@ -119,21 +104,20 @@ async function postToThread(channelId, threadTs, text, blocks) {
 }
 
 // ── Helper: resolve profile or send auth link ──────────────────────────────
-async function resolveOrAuth(slackUserId, workspaceId, channelId, threadTs) {
+async function resolveOrAuth(slackUserId, workspaceId, channelId, opts = {}) {
   const profile = await resolveUser('slack', slackUserId, workspaceId);
   if (!profile) {
     const authMsg = formatAuthLink(slackUserId, workspaceId);
-    await postToThread(channelId, threadTs, authMsg.text, authMsg.blocks);
+    await postSlackMessage(channelId, authMsg.text, authMsg.blocks, opts);
     return null;
   }
   return profile;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// OAuth Routes (plain GET — no signature verification needed)
+// OAuth Routes
 // ═══════════════════════════════════════════════════════════════════════════
 
-// Resolve the public base URL (prod Vercel domain or localhost for dev)
 function getBaseUrl(req) {
   if (process.env.PUBLIC_URL) return process.env.PUBLIC_URL;
   if (process.env.NODE_ENV === 'production' || req.get('host')?.includes('vercel.app')) {
@@ -142,7 +126,6 @@ function getBaseUrl(req) {
   return `${req.protocol}://${req.get('host')}`;
 }
 
-// GET /api/slack/install
 router.get('/install', (req, res) => {
   const scopes = 'chat:write,commands,files:read,im:history,im:write,app_mentions:read,users:read';
   const clientId = process.env.SLACK_CLIENT_ID;
@@ -150,7 +133,6 @@ router.get('/install', (req, res) => {
   res.redirect(`https://slack.com/oauth/v2/authorize?client_id=${clientId}&scope=${scopes}&redirect_uri=${encodeURIComponent(redirectUri)}`);
 });
 
-// GET /api/slack/oauth/callback
 router.get('/oauth/callback', async (req, res) => {
   const { code, error } = req.query;
 
@@ -186,13 +168,10 @@ router.get('/oauth/callback', async (req, res) => {
     console.log('');
     console.log('═══════════════════════════════════════════════════');
     console.log('  Slack app installed successfully!');
-    console.log('═══════════════════════════════════════════════════');
     console.log(`  Team: ${teamName} (${data.team?.id})`);
-    console.log(`  Bot User ID: ${data.bot_user_id}`);
     console.log(`  SLACK_BOT_TOKEN=${botToken}`);
     console.log('═══════════════════════════════════════════════════');
 
-    // Reset the cached client so it picks up the new token next time
     slackClient = null;
 
     res.send(`
@@ -215,28 +194,32 @@ router.get('/oauth/callback', async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Event API (POST — requires signature verification + raw body)
+// Event API
 // ═══════════════════════════════════════════════════════════════════════════
 
 router.post('/events', rawBodyParser, captureRawBody, verifySlackSignature, async (req, res) => {
   const body = req.body;
 
-  // URL verification challenge (Slack sends this on initial setup)
   if (body.type === 'url_verification') {
     return res.json({ challenge: body.challenge });
   }
 
-  // Acknowledge immediately (Slack requires 200 within 3 seconds)
   res.status(200).send();
 
-  // Process event asynchronously
   if (body.type === 'event_callback') {
     const event = body.event;
     const workspaceId = body.team_id;
 
     try {
       if (event.type === 'message' && !event.subtype && !event.bot_id) {
-        await handleDM(event, workspaceId);
+        // DMs: channel_type === 'im'
+        const isDM = event.channel_type === 'im';
+        if (isDM) {
+          await handleDM(event, workspaceId);
+        } else {
+          // Message in a channel — only respond if in a thread we're tracking
+          await handleChannelThread(event, workspaceId);
+        }
       } else if (event.type === 'app_mention') {
         await handleMention(event, workspaceId);
       }
@@ -247,11 +230,10 @@ router.post('/events', rawBodyParser, captureRawBody, verifySlackSignature, asyn
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Slash Commands (POST — URL-encoded body)
+// Slash Commands
 // ═══════════════════════════════════════════════════════════════════════════
 
 router.post('/commands', rawBodyParser, captureRawBody, verifySlackSignature, async (req, res) => {
-  // Acknowledge immediately
   res.status(200).send();
 
   const { user_id: slackUserId, team_id: workspaceId, text } = req.body;
@@ -301,11 +283,11 @@ router.post('/commands', rawBodyParser, captureRawBody, verifySlackSignature, as
       return;
     }
     case 'status': {
-      await respond("Send this in a project thread and I'll give you the status.");
+      await respond("DM me 'status' and I'll tell you where your project stands.");
       return;
     }
     default: {
-      await respond("Hey! I'm Penny. Here's what I can do:\n• `/penny new [rfp|rfi|brainstorm]` — Start a new project\n• `/penny list` — See your active projects\n• `/penny status` — Check project status (in a thread)\n\nOr just DM me and tell me what you need!");
+      await respond("Hey! I'm Penny. Here's what I can do:\n• `/penny new [rfp|rfi|brainstorm]` — Start a new project\n• `/penny list` — See your active projects\n\nOr just DM me and tell me what you need!");
     }
   }
 });
@@ -314,17 +296,22 @@ router.post('/commands', rawBodyParser, captureRawBody, verifySlackSignature, as
 // Event Handlers
 // ═══════════════════════════════════════════════════════════════════════════
 
+/**
+ * Handle DM messages — flat conversation, no threads.
+ * Conversation tracked by channelId only (one active project per DM).
+ */
 async function handleDM(event, workspaceId) {
   const slackUserId = event.user;
   const channelId = event.channel;
-  const threadTs = event.thread_ts || event.ts;
 
-  const profile = await resolveOrAuth(slackUserId, workspaceId, channelId, threadTs);
+  // For DMs: use channelId as the threadId too (flat conversation key)
+  const conversationKey = channelId;
+
+  const profile = await resolveOrAuth(slackUserId, workspaceId, channelId);
   if (!profile) return;
 
-  // Handle file uploads
   if (event.files && event.files.length > 0) {
-    await handleFileUpload(event, profile, channelId, threadTs);
+    await handleFileUpload(event, profile, channelId, conversationKey);
     return;
   }
 
@@ -334,20 +321,24 @@ async function handleDM(event, workspaceId) {
     message: event.text || '',
     platform: 'slack',
     channelId,
-    threadId: threadTs,
+    threadId: conversationKey,
     messageId: event.ts,
     postMessage: async (text, blocks) => {
-      await postToThread(channelId, threadTs, text, blocks);
+      // DMs: post flat — no thread_ts
+      await postSlackMessage(channelId, text, blocks);
     },
   });
 }
 
+/**
+ * Handle @Penny mentions in channels — use threads.
+ */
 async function handleMention(event, workspaceId) {
   const slackUserId = event.user;
   const channelId = event.channel;
   const threadTs = event.thread_ts || event.ts;
 
-  const profile = await resolveOrAuth(slackUserId, workspaceId, channelId, threadTs);
+  const profile = await resolveOrAuth(slackUserId, workspaceId, channelId, { threadTs });
   if (!profile) return;
 
   const text = (event.text || '').replace(/<@[A-Z0-9]+>/g, '').trim();
@@ -361,20 +352,38 @@ async function handleMention(event, workspaceId) {
     threadId: threadTs,
     messageId: event.ts,
     postMessage: async (msg, blocks) => {
-      await postToThread(channelId, threadTs, msg, blocks);
+      // Channels: post in thread
+      await postSlackMessage(channelId, msg, blocks, { threadTs });
     },
   });
 }
 
-async function handleFileUpload(event, profile, channelId, threadTs) {
+/**
+ * Handle messages in channel threads we're already tracking.
+ */
+async function handleChannelThread(event, workspaceId) {
+  if (!event.thread_ts) return; // Not in a thread — ignore
+
+  const { resolveConversation } = require('../services/chatPlatform/bridge');
+  const convo = await resolveConversation('slack', event.channel, event.thread_ts);
+  if (!convo) return; // Not a thread we're tracking
+
+  // Treat like a mention in an existing thread
+  await handleMention(event, workspaceId);
+}
+
+/**
+ * Handle file uploads in conversations.
+ */
+async function handleFileUpload(event, profile, channelId, conversationKey, threadTs) {
   const { resolveConversation } = require('../services/chatPlatform/bridge');
   const { db } = require('../db');
   const { projects, uploadedFiles } = require('../db/schema');
   const { eq } = require('drizzle-orm');
 
-  const convo = await resolveConversation('slack', channelId, threadTs);
+  const convo = await resolveConversation('slack', channelId, conversationKey);
   if (!convo || !convo.projectId) {
-    await postToThread(channelId, threadTs, "I got a file, but I'm not sure which project it's for. Start a conversation first and then share the file.");
+    await postSlackMessage(channelId, "I got a file, but I'm not sure which project it's for. Start a conversation first and then share the file.", null, { threadTs });
     return;
   }
 
@@ -383,7 +392,7 @@ async function handleFileUpload(event, profile, channelId, threadTs) {
     const ext = (file.name || '').toLowerCase().match(/\.[^.]+$/)?.[0];
 
     if (!ext || !supported.includes(ext)) {
-      await postToThread(channelId, threadTs, `I can only work with PDF, DOCX, and TXT files. \`${file.name}\` isn't a supported format.`);
+      await postSlackMessage(channelId, `I can only work with PDF, DOCX, and TXT files. \`${file.name}\` isn't a supported format.`, null, { threadTs });
       continue;
     }
 
@@ -420,7 +429,7 @@ async function handleFileUpload(event, profile, channelId, threadTs) {
 
       await db.update(projects).set({ fileContext: newContext, updatedAt: new Date() }).where(eq(projects.id, convo.projectId));
 
-      await postToThread(channelId, threadTs, `Got it — I've added *${file.name}* to the project.`);
+      await postSlackMessage(channelId, `Got it — I've added *${file.name}* to the project.`, null, { threadTs });
 
       const { planningChat } = require('../services/agents/planningAgent');
       const planningMessages = [...(project?.planningMessages || [])];
@@ -442,10 +451,10 @@ async function handleFileUpload(event, profile, channelId, threadTs) {
 
       planningMessages.push({ role: 'assistant', content: agentResponse, source: 'agent', timestamp: new Date().toISOString() });
       await db.update(projects).set({ planningMessages, updatedAt: new Date() }).where(eq(projects.id, convo.projectId));
-      await postToThread(channelId, threadTs, agentResponse);
+      await postSlackMessage(channelId, agentResponse, null, { threadTs });
     } catch (err) {
       console.error(`File processing error (${file.name}):`, err.message);
-      await postToThread(channelId, threadTs, `I couldn't process *${file.name}* — try uploading it directly in Tendr instead.`);
+      await postSlackMessage(channelId, `I couldn't process *${file.name}* — try uploading it directly in Tendr instead.`, null, { threadTs });
     }
   }
 }
