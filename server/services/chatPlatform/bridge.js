@@ -13,20 +13,15 @@ const { db } = require('../../db');
 const { projects, chatConversations, documentSections } = require('../../db/schema');
 const { eq, and, desc } = require('drizzle-orm');
 const { planningChat, generateBrief } = require('../agents/planningAgent');
-const { getAgent } = require('../agents/orchestrators/agentDefinitions');
 const { regenerateSection } = require('../agents/sectionWriter');
 const { agentCall } = require('../claudeService');
-const { wrapUserContent } = require('../security/promptDefense');
 const { matchSection } = require('./sectionMatcher');
 const pipelineRunner = require('./pipelineRunner');
 
 /**
  * Strip agent self-introductions from responses.
- * Nova/Zuno/Zia introduce themselves in their first response — remove that for Slack.
  */
 function stripAgentIntro(text) {
-  // Remove lines like "Hey! I'm Nova, your RFP architect — ..."
-  // or "I'm Zuno, a curious..." etc.
   return text
     .replace(/^(?:Hey[!.]?\s*)?I'm (?:Nova|Zuno|Zia)[^.!?\n]*[.!?]?\s*/i, '')
     .replace(/^(?:Hey there[!.]?\s*)?I'm (?:Nova|Zuno|Zia)[^.!?\n]*[.!?]?\s*/i, '')
@@ -81,8 +76,9 @@ RULES:
 - "greeting": ONLY if the very first message is just hi/hello/hey with zero project context
 - "new_project": user describes a project need AND we know or can infer the doc type. If user says "build an RFP" or "I need an RFI", that IS a new project with a clear docType.
 - "planning": user is answering questions or providing project details in an ongoing conversation
-- "generate": user explicitly says "generate", "go for it", "let's do it", "build it", "I'm ready", "looks good generate" etc.
+- "generate": user explicitly says "generate", "go for it", "let's do it", "build it", "I'm ready", "looks good generate", "yes go ahead" after seeing a brief
 - "edit_section": user wants to modify a specific section of an existing document (phase must be "done")
+- "status": user asks about progress, says "status?", "how's it going?", "is it done?", "update?" etc.
 - If phase is "intake" or "exploring" and user provides project details, classify as "planning"
 - If phase is "done" and mentions a section name, classify as "edit_section"
 - When in doubt between "new_project" and "planning", prefer "planning" if a conversation already exists
@@ -90,7 +86,6 @@ RULES:
 - Return ONLY the JSON. No explanations.`;
 
 // Slack-specific instruction injected into the planning agent's messages
-// so the agent doesn't introduce itself by name — Penny is the face.
 const SLACK_AGENT_CONTEXT = `CRITICAL OVERRIDE — READ THIS FIRST:
 You are responding through Slack as "Penny." The user does NOT know you exist as a separate agent.
 - NEVER say "I'm Nova", "I'm Zuno", "I'm Zia", or introduce yourself by any name.
@@ -146,7 +141,6 @@ async function getActiveProjects(userId) {
  * Includes recent conversation history for context.
  */
 async function classifyIntent(message, phase, conversationHistory) {
-  // Build context from recent messages (last 6)
   const recentHistory = (conversationHistory || []).slice(-6);
   let historyStr = '';
   if (recentHistory.length > 0) {
@@ -186,6 +180,39 @@ async function pennyMessage(userMessage, context = '') {
 }
 
 /**
+ * Build a status message based on current project phase.
+ * No LLM call needed — just read the state.
+ */
+function getStatusMessage(project, agentLabel) {
+  if (!project) return "We haven't started a project yet. What do you need?";
+
+  const title = project.title !== 'Untitled Project' ? `*${project.title}*` : 'your document';
+
+  switch (project.phase) {
+    case 'intake':
+    case 'scope_lock':
+    case 'requirements':
+    case 'eval_pricing':
+    case 'question_design':
+    case 'exploring':
+      return `We're still in the planning phase for ${title}. Keep giving me details and I'll let you know when we have enough to build a brief.`;
+
+    case 'readiness':
+      return `I've got a brief ready for ${title}. Want me to generate the full document? Just say the word.`;
+
+    case 'generating':
+      return `${agentLabel} is still drafting ${title} — I'll ping you as soon as it's done. Hang tight!`;
+
+    case 'handoff':
+    case 'done':
+      return `${title} is done! Let me know if you want to tweak any sections.`;
+
+    default:
+      return `${title} is in progress. What do you need?`;
+  }
+}
+
+/**
  * Main message handler — routes incoming messages to the right service.
  */
 async function handleMessage({ profileId, profile, message, platform, channelId, threadId, messageId, postMessage }) {
@@ -198,14 +225,31 @@ async function handleMessage({ profileId, profile, message, platform, channelId,
     project = p || null;
   }
 
-  // Get conversation history for context
-  const conversationHistory = project?.planningMessages || [];
+  // 2. Phase-aware fast paths — handle certain phases BEFORE calling the classifier
+  //    This prevents the LLM from misrouting during generation or after completion.
+  if (project) {
+    const agentLabel = AGENT_LABELS[project.documentType] || 'Nova, our RFP writer';
+    const msgLower = message.toLowerCase().trim();
 
-  // 2. Classify intent with conversation history
+    // During generation: any message gets a status response (no LLM needed)
+    if (project.phase === 'generating') {
+      await postMessage(getStatusMessage(project, agentLabel));
+      return;
+    }
+
+    // Quick status check keywords
+    if (/^(status|update|how('?s| is) it going|is it (done|ready)|progress|where are we)\??$/i.test(msgLower)) {
+      await postMessage(getStatusMessage(project, agentLabel));
+      return;
+    }
+  }
+
+  // 3. Classify intent with conversation history
+  const conversationHistory = project?.planningMessages || [];
   const phase = convo?.phase || project?.phase || 'none';
   const intent = await classifyIntent(message, phase, conversationHistory);
 
-  // 3. Route based on intent
+  // 4. Route based on intent
   switch (intent.intent) {
     case 'greeting': {
       const firstName = (profile.fullName || '').split(' ')[0] || 'there';
@@ -224,7 +268,6 @@ async function handleMessage({ profileId, profile, message, platform, channelId,
     }
 
     case 'planning': {
-      // No conversation yet — need to create a project first
       if (!convo) {
         if (intent.docType) {
           return await startProject({
@@ -233,13 +276,10 @@ async function handleMessage({ profileId, profile, message, platform, channelId,
             priorMessages: conversationHistory,
           });
         }
-        // Can't determine doc type yet — ask
         const reply = await pennyMessage(message, 'User wants to work on something but hasn\'t specified RFP, RFI, or brainstorm. Ask them naturally.');
         await postMessage(reply);
         return;
       }
-
-      // Continue planning conversation
       return await continuePlanning({ convo, project, message, messageId, profileId, postMessage });
     }
 
@@ -249,6 +289,12 @@ async function handleMessage({ profileId, profile, message, platform, channelId,
         return;
       }
       return await startGeneration({ convo, project, profile, postMessage });
+    }
+
+    case 'status': {
+      const agentLabel = AGENT_LABELS[project?.documentType] || 'Nova, our RFP writer';
+      await postMessage(getStatusMessage(project, agentLabel));
+      return;
     }
 
     case 'edit_section': {
@@ -276,7 +322,6 @@ async function handleMessage({ profileId, profile, message, platform, channelId,
     }
 
     default: {
-      // Fallback: if we have an active conversation in planning, treat as planning
       if (convo && project && ['intake', 'scope_lock', 'requirements', 'eval_pricing', 'question_design', 'exploring'].includes(project.phase)) {
         return await continuePlanning({ convo, project, message, messageId, profileId, postMessage });
       }
@@ -288,12 +333,10 @@ async function handleMessage({ profileId, profile, message, platform, channelId,
 
 /**
  * Create a new project and start the planning conversation.
- * Carries forward any prior messages from the pre-project conversation.
  */
 async function startProject({ profileId, profile, docType, message, platform, channelId, threadId, messageId, postMessage, priorMessages }) {
   const agentLabel = AGENT_LABELS[docType.toLowerCase()] || 'Nova, our RFP writer';
 
-  // Create project
   const [project] = await db
     .insert(projects)
     .values({
@@ -306,23 +349,17 @@ async function startProject({ profileId, profile, docType, message, platform, ch
     })
     .returning();
 
-  // Create conversation mapping
-  const convo = await createConversation({
-    platform,
-    channelId,
-    threadId,
+  await createConversation({
+    platform, channelId, threadId,
     projectId: project.id,
     userId: profileId,
   });
 
-  // Penny acknowledges — she's the face, agents work behind the scenes
   await postMessage(`On it — I'll be working with ${agentLabel} on this. Let me get some details from you.`);
 
-  // Build planning messages — carry forward ALL prior messages from the thread
+  // Build planning messages — carry forward prior messages
   const planningMessages = [];
-
   if (priorMessages && priorMessages.length > 0) {
-    // Carry forward prior conversation (Penny ↔ user before project was created)
     for (const msg of priorMessages) {
       planningMessages.push({
         role: msg.role,
@@ -333,7 +370,6 @@ async function startProject({ profileId, profile, docType, message, platform, ch
     }
   }
 
-  // Add the current message
   planningMessages.push({
     role: 'user',
     content: message,
@@ -343,32 +379,13 @@ async function startProject({ profileId, profile, docType, message, platform, ch
     timestamp: new Date().toISOString(),
   });
 
-  // Call planning agent with Slack context injected.
-  // The override goes as the LAST assistant message before user content
-  // so it takes priority over the agent's own system prompt.
-  const messagesForAgent = [];
-  // Fake a prior exchange so the agent thinks it already introduced itself
-  messagesForAgent.push({ role: 'user', content: 'Hey, I need help with a procurement document.' });
-  messagesForAgent.push({ role: 'assistant', content: 'Sure thing! Tell me about what you need and I\'ll start gathering the details.' });
-  // Now add real messages
-  messagesForAgent.push(...planningMessages);
-  // Append override reminder as system-level context in the last user message
-  const lastIdx = messagesForAgent.length - 1;
-  if (messagesForAgent[lastIdx].role === 'user') {
-    messagesForAgent[lastIdx] = {
-      ...messagesForAgent[lastIdx],
-      content: messagesForAgent[lastIdx].content + `\n\n[${SLACK_AGENT_CONTEXT}]`,
-    };
-  }
-
   const agentResponse = await planningChat({
-    messages: messagesForAgent,
+    messages: buildAgentMessages(planningMessages),
     fileContext: project.fileContext || '',
     model: project.model || 'sonnet',
     docType: project.documentType,
   });
 
-  // Save messages (without the injected context — those are ephemeral)
   planningMessages.push({
     role: 'assistant',
     content: agentResponse,
@@ -390,7 +407,6 @@ async function startProject({ profileId, profile, docType, message, platform, ch
 async function continuePlanning({ convo, project, message, messageId, profileId, postMessage }) {
   const planningMessages = [...(project.planningMessages || [])];
 
-  // Append user message
   planningMessages.push({
     role: 'user',
     content: message,
@@ -400,7 +416,37 @@ async function continuePlanning({ convo, project, message, messageId, profileId,
     timestamp: new Date().toISOString(),
   });
 
-  // Call planning agent with Slack identity override
+  const agentResponse = await planningChat({
+    messages: buildAgentMessages(planningMessages),
+    fileContext: project.fileContext || '',
+    model: project.model || 'sonnet',
+    docType: project.documentType,
+  });
+
+  planningMessages.push({
+    role: 'assistant',
+    content: agentResponse,
+    source: 'agent',
+    timestamp: new Date().toISOString(),
+  });
+
+  await db
+    .update(projects)
+    .set({ planningMessages, updatedAt: new Date() })
+    .where(eq(projects.id, project.id));
+
+  await db
+    .update(chatConversations)
+    .set({ lastActivity: new Date(), updatedAt: new Date() })
+    .where(eq(chatConversations.id, convo.id));
+
+  await postMessage(stripAgentIntro(agentResponse));
+}
+
+/**
+ * Build messages array for the planning agent with Slack identity override.
+ */
+function buildAgentMessages(planningMessages) {
   const messagesForAgent = [
     { role: 'user', content: 'Hey, I need help with a procurement document.' },
     { role: 'assistant', content: 'Sure thing! Tell me about what you need and I\'ll start gathering the details.' },
@@ -414,35 +460,7 @@ async function continuePlanning({ convo, project, message, messageId, profileId,
       content: messagesForAgent[lastIdx].content + `\n\n[${SLACK_AGENT_CONTEXT}]`,
     };
   }
-
-  const agentResponse = await planningChat({
-    messages: messagesForAgent,
-    fileContext: project.fileContext || '',
-    model: project.model || 'sonnet',
-    docType: project.documentType,
-  });
-
-  // Append agent response
-  planningMessages.push({
-    role: 'assistant',
-    content: agentResponse,
-    source: 'agent',
-    timestamp: new Date().toISOString(),
-  });
-
-  // Save to project
-  await db
-    .update(projects)
-    .set({ planningMessages, updatedAt: new Date() })
-    .where(eq(projects.id, project.id));
-
-  // Update conversation last activity
-  await db
-    .update(chatConversations)
-    .set({ lastActivity: new Date(), updatedAt: new Date() })
-    .where(eq(chatConversations.id, convo.id));
-
-  await postMessage(stripAgentIntro(agentResponse));
+  return messagesForAgent;
 }
 
 /**
@@ -452,7 +470,6 @@ async function startGeneration({ convo, project, profile, postMessage }) {
   const agentLabel = AGENT_LABELS[project.documentType] || 'Nova, our RFP writer';
   const firstName = (profile.fullName || '').split(' ')[0] || 'there';
 
-  // If no brief yet, generate one first
   if (!project.briefData) {
     await postMessage("Let me pull together a brief from everything we've discussed...");
 
@@ -467,7 +484,6 @@ async function startGeneration({ convo, project, profile, postMessage }) {
       .set({ briefData: brief, phase: 'readiness', updatedAt: new Date() })
       .where(eq(projects.id, project.id));
 
-    // Format brief for Slack
     const sectionList = (brief.suggestedSections || [])
       .map((s, i) => `${i + 1}. ${s.title}`)
       .join('\n');
@@ -478,8 +494,21 @@ async function startGeneration({ convo, project, profile, postMessage }) {
     return;
   }
 
-  // Brief exists — start pipeline
-  await postMessage(`I'm handing this to ${agentLabel} to draft — I'll ping you when it's ready.`);
+  // Brief exists — start generation. Penny delegates, doesn't "hand off".
+  await postMessage(`Got it — ${agentLabel} is drafting the full document now. I'll ping you when it's ready.`);
+
+  // Update phase immediately so status checks work
+  await db
+    .update(projects)
+    .set({ phase: 'generating', updatedAt: new Date() })
+    .where(eq(projects.id, project.id));
+
+  if (convo) {
+    await db
+      .update(chatConversations)
+      .set({ phase: 'generating', updatedAt: new Date() })
+      .where(eq(chatConversations.id, convo.id));
+  }
 
   pipelineRunner.runAsync({
     projectId: project.id,
@@ -491,7 +520,6 @@ async function startGeneration({ convo, project, profile, postMessage }) {
         `Hey ${firstName}, your document is ready — ${sectionCount} sections. Take a look and let me know if anything needs tweaking.`
       );
 
-      // Update conversation phase
       if (convo) {
         await db
           .update(chatConversations)
@@ -500,7 +528,13 @@ async function startGeneration({ convo, project, profile, postMessage }) {
       }
     },
     onError: async (errMsg) => {
-      await postMessage(`Ran into an issue generating the document: ${errMsg}. Want to try again?`);
+      // Reset phase so user can retry
+      await db
+        .update(projects)
+        .set({ phase: 'readiness', updatedAt: new Date() })
+        .where(eq(projects.id, project.id));
+
+      await postMessage(`Ran into an issue generating the document. Want to try again?`);
     },
   });
 }
