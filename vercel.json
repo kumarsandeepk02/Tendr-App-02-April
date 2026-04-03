@@ -1,5 +1,5 @@
 {
-  "buildCommand": "cd rfp-builder && npm install && npm run build",
+  "buildCommand": "cd rfp-builder && rm -rf node_modules/.cache && npm install && npm run build",
   "outputDirectory": "rfp-builder/build",
   "framework": null,
   "rewrites": [
