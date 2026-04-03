@@ -122,7 +122,7 @@ async function postToThread(channelId, threadTs, text, blocks) {
 async function resolveOrAuth(slackUserId, workspaceId, channelId, threadTs) {
   const profile = await resolveUser('slack', slackUserId, workspaceId);
   if (!profile) {
-    const authMsg = formatAuthLink(slackUserId);
+    const authMsg = formatAuthLink(slackUserId, workspaceId);
     await postToThread(channelId, threadTs, authMsg.text, authMsg.blocks);
     return null;
   }
@@ -273,7 +273,7 @@ router.post('/commands', rawBodyParser, captureRawBody, verifySlackSignature, as
 
   const profile = await resolveUser('slack', slackUserId, workspaceId);
   if (!profile) {
-    const authMsg = formatAuthLink(slackUserId);
+    const authMsg = formatAuthLink(slackUserId, workspaceId);
     await respond({ text: authMsg.text, blocks: authMsg.blocks });
     return;
   }
