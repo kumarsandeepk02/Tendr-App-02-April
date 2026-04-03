@@ -39,6 +39,7 @@ function sessionCookieOptions() {
     path: '/',
     maxAge: 24 * 60 * 60 * 1000, // 24 hours
     signed: true,
+    domain: IS_PROD ? '.moleculeone.ai' : undefined,
   };
 }
 
@@ -68,6 +69,7 @@ router.get('/login', (req, res) => {
     sameSite: 'lax',
     maxAge: 10 * 60 * 1000, // 10 minutes
     signed: true,
+    domain: IS_PROD ? '.moleculeone.ai' : undefined,
   });
 
   const authorizationUrl = workos.userManagement.getAuthorizationUrl({
@@ -99,7 +101,7 @@ router.get('/callback', async (req, res) => {
 
     // ── Validate OAuth state ───────────────────────────────────────────
     const storedState = req.signedCookies?.oauth_state;
-    res.clearCookie('oauth_state', { path: '/' });
+    res.clearCookie('oauth_state', { path: '/', domain: IS_PROD ? '.moleculeone.ai' : undefined });
 
     if (!state || !storedState || state !== storedState) {
       return res.redirect(`${process.env.FRONTEND_URL}/auth/error?reason=invalid_state`);
@@ -145,7 +147,7 @@ router.get('/me', authMiddleware, (req, res) => {
  * Clears the session cookie.
  */
 router.post('/logout', (req, res) => {
-  res.clearCookie('tendr_session', { path: '/' });
+  res.clearCookie('tendr_session', { path: '/', domain: IS_PROD ? '.moleculeone.ai' : undefined });
   res.json({ success: true });
 });
 
