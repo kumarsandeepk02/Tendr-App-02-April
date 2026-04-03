@@ -1,6 +1,8 @@
 import axios from 'axios';
 
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
+// In production: empty string → same-origin (Vercel proxies /api/* to App Runner).
+// In dev: hit local server directly.
+const API_URL = process.env.REACT_APP_API_URL ?? 'http://localhost:3001';
 
 /**
  * Pre-configured axios instance.

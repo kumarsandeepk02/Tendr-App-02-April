@@ -3,6 +3,7 @@
   "outputDirectory": "rfp-builder/build",
   "framework": null,
   "rewrites": [
+    { "source": "/api/:path*", "destination": "https://vfnppp3xrc.us-east-1.awsapprunner.com/api/:path*" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
