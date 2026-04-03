@@ -23,7 +23,7 @@ const client = new Anthropic({
 // Supported models — add new models here
 const MODELS = {
   'sonnet': { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', description: 'Balanced speed & quality', tier: 'default' },
-  'haiku': { id: 'claude-haiku-4-5-20250414', label: 'Claude Haiku 4.5', description: 'Fastest, most affordable', tier: 'fast' },
+  'haiku': { id: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5', description: 'Fastest, most affordable', tier: 'fast' },
   'opus': { id: 'claude-opus-4-2025-04-16', label: 'Claude Opus 4', description: 'Highest quality output', tier: 'premium' },
 };
 
