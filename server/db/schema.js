@@ -59,10 +59,32 @@ const usageEventTypeEnum = pgEnum('usage_event_type', [
 
 const chatPlatformEnum = pgEnum('chat_platform', ['slack', 'teams']);
 
+const tenantTypeEnum = pgEnum('tenant_type', ['individual', 'enterprise']);
+
+// ── Tenants ────────────────────────────────────────────────────────────────
+const tenants = pgTable(
+  'tenants',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    slug: varchar('slug', { length: 100 }).unique().notNull(),
+    name: text('name').notNull(),
+    type: tenantTypeEnum('type').notNull().default('individual'),
+    workosOrgId: text('workos_org_id').unique(),
+    settings: jsonb('settings').default(sql`'{}'::jsonb`),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_tenants_slug').on(table.slug),
+    index('idx_tenants_workos_org').on(table.workosOrgId),
+  ]
+);
+
 // ── Profiles ────────────────────────────────────────────────────────────────
 const profiles = pgTable('profiles', {
   id: uuid('id').primaryKey().defaultRandom(),
   workosUserId: text('workos_user_id').unique().notNull(),
+  tenantId: uuid('tenant_id').references(() => tenants.id, { onDelete: 'cascade' }),
   fullName: text('full_name').notNull().default(''),
   avatarUrl: text('avatar_url'),
   role: text('role').default('procurement_manager'),
@@ -155,6 +177,7 @@ const projectFolders = pgTable(
     userId: uuid('user_id')
       .notNull()
       .references(() => profiles.id, { onDelete: 'cascade' }),
+    tenantId: uuid('tenant_id').references(() => tenants.id, { onDelete: 'cascade' }),
     teamId: uuid('team_id').references(() => teams.id, { onDelete: 'set null' }),
     name: text('name').notNull(),
     description: text('description'),
@@ -176,6 +199,7 @@ const projects = pgTable(
     userId: uuid('user_id')
       .notNull()
       .references(() => profiles.id, { onDelete: 'cascade' }),
+    tenantId: uuid('tenant_id').references(() => tenants.id, { onDelete: 'cascade' }),
     teamId: uuid('team_id').references(() => teams.id, { onDelete: 'set null' }),
     folderId: uuid('folder_id').references(() => projectFolders.id, { onDelete: 'set null' }),
     title: text('title').notNull().default('Untitled Document'),
@@ -322,6 +346,7 @@ const usageEvents = pgTable(
     userId: uuid('user_id')
       .notNull()
       .references(() => profiles.id, { onDelete: 'cascade' }),
+    tenantId: uuid('tenant_id').references(() => tenants.id, { onDelete: 'cascade' }),
     teamId: uuid('team_id').references(() => teams.id, { onDelete: 'set null' }),
     projectId: uuid('project_id').references(() => projects.id, {
       onDelete: 'set null',
@@ -423,7 +448,9 @@ module.exports = {
   invitationStatusEnum,
   usageEventTypeEnum,
   chatPlatformEnum,
+  tenantTypeEnum,
   // Tables
+  tenants,
   profiles,
   teams,
   teamMemberships,

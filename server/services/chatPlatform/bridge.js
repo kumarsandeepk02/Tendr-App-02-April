@@ -131,11 +131,13 @@ async function createConversation({ platform, channelId, threadId, projectId, us
   return convo;
 }
 
-async function getActiveProjects(userId) {
+async function getActiveProjects(userId, tenantId) {
+  const conditions = [eq(projects.userId, userId), eq(projects.status, 'in_progress')];
+  if (tenantId) conditions.push(eq(projects.tenantId, tenantId));
   return db
     .select()
     .from(projects)
-    .where(and(eq(projects.userId, userId), eq(projects.status, 'in_progress')))
+    .where(and(...conditions))
     .orderBy(desc(projects.updatedAt))
     .limit(10);
 }
@@ -332,7 +334,7 @@ async function handleMessage({ profileId, profile, message, platform, channelId,
     }
 
     case 'list_projects': {
-      const active = await getActiveProjects(profileId);
+      const active = await getActiveProjects(profileId, profile.tenantId);
       if (active.length === 0) {
         await postMessage("You don't have any active projects. Want to start one?");
       } else {
@@ -362,7 +364,8 @@ async function startProject({ profileId, profile, docType, message, platform, ch
     .insert(projects)
     .values({
       userId: profileId,
-      title: 'Untitled Project',
+      tenantId: profile.tenantId || null,
+      title: 'Untitled Document',
       documentType: docType.toLowerCase(),
       phase: 'intake',
       status: 'in_progress',

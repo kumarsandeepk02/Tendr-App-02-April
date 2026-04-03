@@ -153,6 +153,8 @@ async function authMiddleware(req, res, next) {
     req.auth = {
       profileId: profile.id,
       workosUserId: session.id,
+      workosOrgId: payload.org_id || null,
+      role: payload.role || null,
       profile,
     };
     next();
