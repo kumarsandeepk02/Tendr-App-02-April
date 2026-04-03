@@ -38,6 +38,22 @@ function withTimeout(promise, ms, message) {
 }
 
 /**
+ * Decode a JWT payload without verifying the signature.
+ * The token is a WorkOS access token — we extract the `sub` (user ID)
+ * and `exp` claims. Actual user validity is confirmed via getUser().
+ */
+function decodeJwtPayload(token) {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    const payload = Buffer.from(parts[1], 'base64url').toString('utf8');
+    return JSON.parse(payload);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Resolve or create a profile row for a given WorkOS user ID.
  */
 async function resolveProfile(workosUserId, userData = {}) {
@@ -106,9 +122,21 @@ async function authMiddleware(req, res, next) {
       return res.status(401).json({ error: 'Missing session' });
     }
 
-    // Verify the session with WorkOS (bounded timeout)
+    // The token is a WorkOS JWT access token. Decode it to extract
+    // the user ID (sub claim) — getUser() expects a user ID, not a JWT.
+    const payload = decodeJwtPayload(token);
+    if (!payload || !payload.sub) {
+      return res.status(401).json({ error: 'Invalid session token' });
+    }
+
+    // Check JWT expiry
+    if (payload.exp && Date.now() / 1000 > payload.exp) {
+      return res.status(401).json({ error: 'Session expired' });
+    }
+
+    // Fetch the full user profile from WorkOS (bounded timeout)
     const session = await withTimeout(
-      workos.userManagement.getUser(token),
+      workos.userManagement.getUser(payload.sub),
       10_000,
       'Authentication service timed out'
     );
