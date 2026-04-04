@@ -1,4 +1,6 @@
 const { regenerateSection } = require('./agents/sectionWriter');
+const { db } = require('../db');
+const { projects } = require('../db/schema');
 
 // ── Tool Schemas (Anthropic tool_use format) ───────────────────────────────
 
@@ -136,6 +138,19 @@ const TOOL_SCHEMAS = [
         contentDescription: { type: 'string', description: 'Brief description of what this section contains.' },
       },
       required: ['sectionTitle'],
+    },
+  },
+  {
+    name: 'create_document',
+    description: 'Create a new companion document in the same project folder. Use when the user wants to build a follow-up document. Procurement workflow: RFI → RFP → Contract. After an RFI, suggest building the full RFP. After an RFP, suggest evaluation matrix or SOW. Never suggest going backwards (RFP → RFI).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Title for the new document.' },
+        documentType: { type: 'string', enum: ['rfp', 'rfi', 'brainstorm'], description: 'Type of document to create.' },
+        folderId: { type: 'string', description: 'Folder ID to place the document in. Omit to use the current document\'s folder.' },
+      },
+      required: ['title', 'documentType'],
     },
   },
 ];
@@ -329,6 +344,52 @@ async function executeTool(toolName, toolInput, documentState, config) {
         result: `Recommended format for "${toolInput.sectionTitle}": ${format}. ${reason}`,
         mutation: section ? { type: 'set_format', sectionTitle: section.title, format, reason } : null,
       };
+    }
+
+    case 'create_document': {
+      const title = toolInput.title || 'Untitled Document';
+      const documentType = toolInput.documentType || 'rfp';
+      const folderId = toolInput.folderId || documentState.folderId || brief.folderId || null;
+
+      try {
+        // Seed the new document with context from the current brief
+        const contextSeed = [];
+        if (brief.projectTitle || brief.projectDescription) {
+          contextSeed.push({
+            role: 'user',
+            content: `[Context from related ${brief.docType || 'document'}: "${brief.projectTitle || 'Untitled'}". ${brief.projectDescription || ''} Industry: ${brief.industry || 'General'}. Requirements: ${(brief.requirements || []).join('; ')}]`,
+            source: 'context_seed',
+            timestamp: new Date().toISOString(),
+          });
+        }
+
+        const [newProject] = await db
+          .insert(projects)
+          .values({
+            userId: config.userId,
+            tenantId: config.tenantId || null,
+            title,
+            documentType: documentType.toLowerCase(),
+            folderId,
+            phase: 'intake',
+            status: 'in_progress',
+            planningMessages: contextSeed.length > 0 ? contextSeed : [],
+          })
+          .returning();
+
+        return {
+          result: `Created "${title}" (${documentType.toUpperCase()}) in your project folder. The new document has context from the current ${brief.docType || 'document'}.`,
+          mutation: {
+            type: 'create_document',
+            projectId: newProject.id,
+            title,
+            documentType,
+            folderId,
+          },
+        };
+      } catch (err) {
+        return { result: `Failed to create document: ${err.message}` };
+      }
     }
 
     default:

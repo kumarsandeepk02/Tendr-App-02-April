@@ -254,6 +254,15 @@ export function useProjects() {
     []
   );
 
+  const fetchFolderDocs = useCallback(async (folderId: string) => {
+    try {
+      const res = await api.get(`/api/projects?folderId=${folderId}&includeBriefs=true`);
+      return (res.data.projects || []) as Array<ProjectMeta & { briefData?: any }>;
+    } catch {
+      return [];
+    }
+  }, []);
+
   return {
     projects: sortedProjects,
     activeProjectId,
@@ -266,6 +275,7 @@ export function useProjects() {
     syncProjectMeta,
     updateProjectMeta,
     moveDocument,
+    fetchFolderDocs,
   };
 }
 

@@ -53,12 +53,13 @@ router.post('/tools', async (req, res) => {
       return res.status(400).json({ error: 'documentState is required' });
     }
 
+    const { profileId, tenantId } = req.auth || {};
     const result = await agentToolLoop(
       systemPrompt,
       messages.filter(m => m.role !== 'system'),
       TOOL_SCHEMAS,
       documentState,
-      { model, docType: documentState.brief?.docType || 'RFP' }
+      { model, docType: documentState.brief?.docType || 'RFP', userId: profileId, tenantId }
     );
 
     res.json({
