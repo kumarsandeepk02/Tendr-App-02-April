@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
-import { V2Phase } from './types';
+import { V2Phase, ToolMutation, DocumentSection } from './types';
 import { useChatV2 } from './hooks/useChatV2';
 import { useDocument } from './hooks/useDocument';
 import { useProjects } from './hooks/useProjects';
@@ -101,6 +101,44 @@ function App() {
     findSectionByTitle,
   } = useDocument(activeProjectId);
 
+  // Handle tool mutations from the agent (tool_use results)
+  const handleToolMutations = useCallback((mutations: ToolMutation[]) => {
+    for (const mutation of mutations) {
+      switch (mutation.type) {
+        case 'update_section': {
+          const section = findSectionByTitle(mutation.sectionTitle || '');
+          if (section) updateSection(section.id, { content: mutation.content! });
+          break;
+        }
+        case 'create_section': {
+          addSection(mutation.title!, mutation.content || '');
+          break;
+        }
+        case 'delete_section': {
+          const section = findSectionByTitle(mutation.sectionTitle || '');
+          if (section) removeSection(section.id);
+          break;
+        }
+        case 'reorder_sections': {
+          const reordered = (mutation.sectionTitles || [])
+            .map(title => documentState.sections.find(
+              s => s.title.toLowerCase() === title.toLowerCase()
+            ))
+            .filter(Boolean) as DocumentSection[];
+          if (reordered.length === documentState.sections.length) {
+            reorderSections(reordered);
+          }
+          break;
+        }
+        case 'update_section_title': {
+          const section = findSectionByTitle(mutation.currentTitle || '');
+          if (section) updateSection(section.id, { title: mutation.newTitle! });
+          break;
+        }
+      }
+    }
+  }, [findSectionByTitle, updateSection, addSection, removeSection, reorderSections, documentState.sections]);
+
   // V2 Chat options
   const chatOptions = useMemo(
     () => ({
@@ -121,8 +159,9 @@ function App() {
       projectId: activeProjectId,
       sections: documentState.sections,
       qualityReview,
+      onToolMutations: handleToolMutations,
     }),
-    [updateMeta, handleStreamStart, handleStreamChunk, handleStreamDone, handleSectionStart, handleSectionDone, handleReviewResult, handleSectionRegenerationStart, handleSectionRegenerationDone, handleDocumentAnalysis, handleCompetitiveIntel, handleStageChange, activeProjectId, documentState.sections, qualityReview]
+    [updateMeta, handleStreamStart, handleStreamChunk, handleStreamDone, handleSectionStart, handleSectionDone, handleReviewResult, handleSectionRegenerationStart, handleSectionRegenerationDone, handleDocumentAnalysis, handleCompetitiveIntel, handleStageChange, activeProjectId, documentState.sections, qualityReview, handleToolMutations]
   );
 
   // V2 Chat state

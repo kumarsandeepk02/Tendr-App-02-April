@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
-const { sendMessage, MODELS, DEFAULT_MODEL_KEY } = require('../services/claudeService');
+const { sendMessage, agentToolLoop, MODELS, DEFAULT_MODEL_KEY } = require('../services/claudeService');
+const { TOOL_SCHEMAS } = require('../services/toolDefinitions');
 const { runPipeline } = require('../services/agentPipeline');
 const { regenerateSection } = require('../services/agents/sectionWriter');
 const { analyzeDocuments } = require('../services/agents/documentAnalyzer');
@@ -37,6 +38,41 @@ router.post('/', async (req, res) => {
     res.status(500).json({
       error: 'Failed to generate response. Please try again.',
     });
+  }
+});
+
+// Tool-enabled chat — server-side tool_use loop
+router.post('/tools', async (req, res) => {
+  try {
+    const { messages, systemPrompt, documentState, model } = req.body;
+
+    if (!messages || !Array.isArray(messages) || messages.length === 0) {
+      return res.status(400).json({ error: 'Messages array is required' });
+    }
+    if (!documentState) {
+      return res.status(400).json({ error: 'documentState is required' });
+    }
+
+    const result = await agentToolLoop(
+      systemPrompt,
+      messages.filter(m => m.role !== 'system'),
+      TOOL_SCHEMAS,
+      documentState,
+      { model, docType: documentState.brief?.docType || 'RFP' }
+    );
+
+    res.json({
+      content: result.content,
+      toolResults: result.toolResults.map(tr => ({
+        tool: tr.tool,
+        args: tr.args,
+        result: tr.result,
+        mutation: tr.mutation,
+      })),
+    });
+  } catch (error) {
+    console.error('Tool chat API error:', error.message);
+    res.status(500).json({ error: 'Failed to process request. Please try again.' });
   }
 });
 

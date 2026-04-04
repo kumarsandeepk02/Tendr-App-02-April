@@ -13,6 +13,38 @@ export interface ChatMessage {
   hidden?: boolean;
 }
 
+// ===================== Tool Use Types =====================
+
+export type ToolMutationType =
+  | 'update_section'
+  | 'create_section'
+  | 'delete_section'
+  | 'reorder_sections'
+  | 'update_section_title';
+
+export interface ToolMutation {
+  type: ToolMutationType;
+  sectionTitle?: string;
+  content?: string;
+  title?: string;
+  position?: number;
+  currentTitle?: string;
+  newTitle?: string;
+  sectionTitles?: string[];
+}
+
+export interface ToolResult {
+  tool: string;
+  args: Record<string, any>;
+  result: string;
+  mutation: ToolMutation | null;
+}
+
+export interface ToolChatResponse {
+  content: string;
+  toolResults: ToolResult[];
+}
+
 export interface OutlineSection {
   id: string;
   title: string;

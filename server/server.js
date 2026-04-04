@@ -122,6 +122,7 @@ app.use('/api/chat/v2/planning', aiLimiter);
 app.use('/api/chat/v2/brief', aiLimiter);
 app.use('/api/chat/v2/readiness', aiLimiter);
 app.use('/api/chat/regenerate-section', aiLimiter);
+app.use('/api/chat/tools', aiLimiter);
 app.use('/api/chat/pipeline', aiLimiter);
 
 // Chat routes: auth + prompt defense
