@@ -382,6 +382,19 @@ const DocumentPreview: React.FC<DocumentPreviewProps> = ({
                 Generating
               </span>
             )}
+            {!isStreaming && qualityReview && (
+              <span
+                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold text-white cursor-pointer ${
+                  qualityReview.score >= 80 ? 'bg-green-500' : qualityReview.score >= 60 ? 'bg-yellow-500' : 'bg-red-500'
+                }`}
+                title="Quality score — click to view details"
+              >
+                {qualityReview.score}/100
+                {qualityReview.issues && qualityReview.issues.length > 0 && (
+                  <span className="text-white/80"> · {qualityReview.issues.length} issues</span>
+                )}
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-2">
             {onToggleChatPanel && (

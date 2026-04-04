@@ -183,18 +183,24 @@ const BriefReview: React.FC<BriefReviewProps> = ({
 
         {/* Missing Info Warning */}
         {brief.confidence.missingInfo.length > 0 && brief.confidence.overall < 0.7 && (
-          <div className="bg-yellow-50 border border-yellow-200 rounded-xl px-4 py-3 mb-6 flex items-start gap-3">
-            <AlertCircle size={16} className="text-yellow-600 mt-0.5 flex-shrink-0" />
+          <div className={`${brief.confidence.overall < 0.5 ? 'bg-red-50 border-red-200' : 'bg-yellow-50 border-yellow-200'} border rounded-xl px-4 py-3 mb-6 flex items-start gap-3`}>
+            <AlertCircle size={16} className={`${brief.confidence.overall < 0.5 ? 'text-red-600' : 'text-yellow-600'} mt-0.5 flex-shrink-0`} />
             <div>
-              <p className="text-xs font-medium text-yellow-800 mb-1">Some info may be missing</p>
-              <p className="text-xs text-yellow-700">
-                {brief.confidence.missingInfo.join('. ')}
+              <p className={`text-xs font-medium ${brief.confidence.overall < 0.5 ? 'text-red-800' : 'text-yellow-800'} mb-1`}>
+                {brief.confidence.overall < 0.5 ? 'Key details missing — document quality will be limited' : 'Some details could improve the output'}
               </p>
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {brief.confidence.missingInfo.map((info: string, i: number) => (
+                  <span key={i} className={`inline-block px-2 py-0.5 text-[10px] font-medium rounded-full ${brief.confidence.overall < 0.5 ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                    {info}
+                  </span>
+                ))}
+              </div>
               <button
                 onClick={onBackToPlanning}
-                className="mt-2 text-xs font-medium text-yellow-800 underline hover:no-underline"
+                className={`text-xs font-medium ${brief.confidence.overall < 0.5 ? 'text-red-800' : 'text-yellow-800'} underline hover:no-underline`}
               >
-                Go back and add more details
+                Go back and add these details
               </button>
             </div>
           </div>
