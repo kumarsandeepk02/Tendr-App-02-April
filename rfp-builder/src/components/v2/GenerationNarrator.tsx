@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { NarrationMessage, NarrationAgent, SectionProgress } from '../../types';
-import { Loader2, CheckCircle2, Sparkles, Brain, PenTool, ShieldCheck, ArrowRight } from 'lucide-react';
+import { NarrationMessage, NarrationAgent, SectionProgress, QualityReview } from '../../types';
+import { Loader2, CheckCircle2, Sparkles, Brain, PenTool, ShieldCheck, ArrowRight, FileDown, MessageSquare } from 'lucide-react';
 
 interface GenerationNarratorProps {
   narrations: NarrationMessage[];
@@ -8,6 +8,12 @@ interface GenerationNarratorProps {
   completedSections: number;
   totalSections: number;
   isGenerating: boolean;
+  qualityReview?: QualityReview | null;
+  agentName?: string;
+  docType?: string;
+  onExportDocx?: () => void;
+  onExportPdf?: () => void;
+  onExportXlsx?: () => void;
 }
 
 // Agent badge configuration
@@ -64,6 +70,12 @@ const GenerationNarrator: React.FC<GenerationNarratorProps> = ({
   completedSections,
   totalSections,
   isGenerating,
+  qualityReview,
+  agentName = 'Nova',
+  docType,
+  onExportDocx,
+  onExportPdf,
+  onExportXlsx,
 }) => {
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -104,6 +116,19 @@ const GenerationNarrator: React.FC<GenerationNarratorProps> = ({
           </div>
         )}
       </div>
+
+      {/* Completion card */}
+      {!isGenerating && completedSections > 0 && (
+        <CompletionCard
+          qualityReview={qualityReview}
+          agentName={agentName}
+          docType={docType}
+          sectionCount={completedSections}
+          onExportDocx={onExportDocx}
+          onExportPdf={onExportPdf}
+          onExportXlsx={onExportXlsx}
+        />
+      )}
 
       {/* Narration feed */}
       <div className="flex-1 overflow-y-auto px-6 py-4">
@@ -211,6 +236,77 @@ const NarrationItem: React.FC<{ message: NarrationMessage }> = ({ message }) => 
           }}
         />
       </div>
+    </div>
+  );
+};
+
+/** Completion card — shown when generation finishes */
+const CompletionCard: React.FC<{
+  qualityReview?: QualityReview | null;
+  agentName: string;
+  docType?: string;
+  sectionCount: number;
+  onExportDocx?: () => void;
+  onExportPdf?: () => void;
+  onExportXlsx?: () => void;
+}> = ({ qualityReview, agentName, docType, sectionCount, onExportDocx, onExportPdf, onExportXlsx }) => {
+  const score = qualityReview?.score;
+  const scoreColor = score ? (score >= 80 ? 'bg-green-500' : score >= 60 ? 'bg-yellow-500' : 'bg-red-500') : 'bg-gray-400';
+  const issueCount = qualityReview?.issues?.length || 0;
+
+  const companion = docType?.toUpperCase() === 'RFP'
+    ? 'Add an RFI to explore vendors first?'
+    : docType?.toUpperCase() === 'RFI'
+    ? 'Ready to build the full RFP?'
+    : null;
+
+  return (
+    <div className="mx-6 mt-4 p-5 bg-white rounded-xl border border-green-200 shadow-sm">
+      <div className="flex items-center gap-3 mb-4">
+        <CheckCircle2 size={24} className="text-green-500" />
+        <div>
+          <h3 className="text-base font-bold text-gray-900">Your document is ready</h3>
+          <p className="text-xs text-gray-500">{sectionCount} sections generated</p>
+        </div>
+        {score && (
+          <div className={`ml-auto flex items-center gap-1.5 px-2.5 py-1 rounded-full ${scoreColor}`}>
+            <span className="text-xs font-bold text-white">{score}/100</span>
+          </div>
+        )}
+      </div>
+
+      {issueCount > 0 && (
+        <p className="text-xs text-amber-700 bg-amber-50 px-3 py-1.5 rounded-lg mb-3">
+          {issueCount} quality {issueCount === 1 ? 'issue' : 'issues'} found — ask {agentName} to fix them
+        </p>
+      )}
+
+      <div className="flex gap-2 mb-3">
+        {onExportDocx && (
+          <button onClick={onExportDocx} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors">
+            <FileDown size={12} /> Word
+          </button>
+        )}
+        {onExportPdf && (
+          <button onClick={onExportPdf} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-white border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors">
+            <FileDown size={12} /> PDF
+          </button>
+        )}
+        {onExportXlsx && (
+          <button onClick={onExportXlsx} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-white border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors">
+            <FileDown size={12} /> Excel
+          </button>
+        )}
+      </div>
+
+      <div className="flex items-center gap-2 text-xs text-gray-500">
+        <MessageSquare size={12} />
+        <span>Ask {agentName} to refine any section</span>
+      </div>
+
+      {companion && (
+        <p className="text-xs text-indigo-600 mt-2 font-medium">{companion}</p>
+      )}
     </div>
   );
 };

@@ -17,7 +17,15 @@ interface PersistentChatProps {
   isGenerating: boolean;
   onSendMessage: (content: string) => Promise<ToolChatResponse>;
   sectionTitles?: string[];
+  agentName?: string;
 }
+
+const PRESET_ACTIONS = [
+  { label: 'Make Concise', prompt: 'Make all sections more concise — remove redundancy and tighten the language' },
+  { label: 'Add Compliance', prompt: 'Add compliance and regulatory language where relevant across all sections' },
+  { label: 'Check Gaps', prompt: 'What important elements are missing from this document?' },
+  { label: 'Expand Scope', prompt: 'Expand the Scope of Work section with more specific detail' },
+];
 
 function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).substr(2, 9);
@@ -48,6 +56,7 @@ const PersistentChat: React.FC<PersistentChatProps> = ({
   isGenerating,
   onSendMessage,
   sectionTitles = [],
+  agentName = 'Nova',
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
@@ -79,12 +88,12 @@ const PersistentChat: React.FC<PersistentChatProps> = ({
         {
           id: generateId(),
           role: 'assistant',
-          content: "Your document is ready! I can help you refine it. Try things like:\n- \"Make the Scope of Work more detailed\"\n- \"Add compliance language to Terms & Conditions\"\n- \"What's missing from this RFP?\"",
+          content: `${agentName} here — your document is ready! I can refine any section, add detail, or check for gaps. Try the quick actions below or just tell me what you need.`,
           timestamp: Date.now(),
         },
       ]);
     }
-  }, [isOpen, phase, messages.length]);
+  }, [isOpen, phase, messages.length, agentName]);
 
   const handleSend = useCallback(async () => {
     const content = input.trim();
@@ -190,7 +199,7 @@ const PersistentChat: React.FC<PersistentChatProps> = ({
             <div className="flex items-center gap-2">
               <Bot size={18} className="text-indigo-200" />
               <span className="text-sm font-semibold text-white">
-                AI Assistant
+                Chat with {agentName}
               </span>
               {isTyping && (
                 <span className="text-xs text-indigo-200 animate-pulse">typing...</span>
@@ -288,6 +297,21 @@ const PersistentChat: React.FC<PersistentChatProps> = ({
 
                 <div ref={messagesEndRef} />
               </div>
+
+              {/* Preset action chips */}
+              {phase === 'done' && messages.length <= 1 && !isTyping && (
+                <div className="px-3 py-2 flex flex-wrap gap-1.5">
+                  {PRESET_ACTIONS.map((action) => (
+                    <button
+                      key={action.label}
+                      onClick={() => { setInput(action.prompt); setTimeout(() => handleSend(), 50); }}
+                      className="px-2.5 py-1 text-[10px] font-medium bg-indigo-50 text-indigo-700 rounded-full hover:bg-indigo-100 transition-colors"
+                    >
+                      {action.label}
+                    </button>
+                  ))}
+                </div>
+              )}
 
               {/* Input area */}
               <div className="border-t border-gray-100 px-3 py-2">

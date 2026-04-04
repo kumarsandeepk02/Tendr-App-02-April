@@ -6,6 +6,9 @@ import { useProjects } from './hooks/useProjects';
 import { useFolders } from './hooks/useFolders';
 import DocumentPreview from './components/DocumentPreview';
 import Toolbar from './components/Toolbar';
+import { exportToDocx } from './utils/exportDocx';
+import { exportToPdf } from './utils/exportPdf';
+import { exportToXlsx } from './utils/exportXlsx';
 import Sidebar from './components/Sidebar';
 import CreateDialog from './components/CreateDialog';
 import FeedbackToast from './components/FeedbackToast';
@@ -371,6 +374,10 @@ function App() {
     isStreaming ||
     documentState.sections.some((s) => s.content.trim());
 
+  // Derive agent name from doc type
+  const agentNameMap: Record<string, string> = { RFP: 'Nova', RFI: 'Zuno', rfp: 'Nova', rfi: 'Zuno', brainstorm: 'Zia' };
+  const agentName = agentNameMap[currentDocType || ''] || agentNameMap[brief?.docType || ''] || 'Nova';
+
   // Determine what to show in the left panel
   const renderLeftPanel = () => {
     switch (phase) {
@@ -411,8 +418,6 @@ function App() {
           />
         ) : null;
       case 'readiness': {
-        const agentNames: Record<string, string> = { RFP: 'Nova', RFI: 'Zuno', rfp: 'Nova', rfi: 'Zuno', brainstorm: 'Zia' };
-        const agentName = agentNames[currentDocType || ''] || agentNames[brief?.docType || ''] || 'Nova';
         return (
           <ReadinessReviewComponent
             review={readinessReview}
@@ -435,7 +440,6 @@ function App() {
           />
         );
       case 'done':
-        // After generation, show a completion message in the narrator
         return (
           <GenerationNarrator
             narrations={narrations}
@@ -443,6 +447,12 @@ function App() {
             completedSections={completedSections}
             totalSections={totalSections}
             isGenerating={false}
+            qualityReview={qualityReview}
+            agentName={agentName}
+            docType={currentDocType || brief?.docType}
+            onExportDocx={() => exportToDocx(documentState)}
+            onExportPdf={() => exportToPdf(documentState)}
+            onExportXlsx={() => exportToXlsx(documentState)}
           />
         );
       default:
@@ -560,6 +570,7 @@ function App() {
         isGenerating={isGenerating}
         onSendMessage={sendFreeformMessage}
         sectionTitles={documentState.sections.map((s) => s.title)}
+        agentName={agentName}
       />
     </div>
   );
