@@ -10,6 +10,7 @@ export interface ChatMessage {
   isLoading?: boolean;
   isError?: boolean;
   isOutline?: boolean;
+  hidden?: boolean;
 }
 
 export interface OutlineSection {

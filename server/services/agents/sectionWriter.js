@@ -90,34 +90,54 @@ DO NOT write generic questions like "Describe your approach" without specifying 
  * Build the user prompt for generating a single section.
  */
 function buildSectionUserPrompt({ sectionTitle, sectionDescription, relevantAnswers, fileContext, previousSections, responseType }) {
-  let prompt = `Generate the complete content for the following section:\n\n`;
+  let prompt = '';
+
+  // Project brief summary — gives the section writer full project context
+  const brief = relevantAnswers || {};
+  if (brief.projectTitle || brief.projectDescription) {
+    prompt += `## Project Brief\n`;
+    if (brief.projectTitle) prompt += `**Project:** ${brief.projectTitle}\n`;
+    if (brief.projectDescription) prompt += `**Description:** ${brief.projectDescription}\n`;
+    if (brief.industry) prompt += `**Industry:** ${brief.industry}\n`;
+    if (brief.timeline) prompt += `**Timeline:** ${brief.timeline}\n`;
+    if (Array.isArray(brief.requirements) && brief.requirements.length > 0) {
+      prompt += `**Requirements:** ${brief.requirements.join('; ')}\n`;
+    }
+    if (Array.isArray(brief.evaluationCriteria) && brief.evaluationCriteria.length > 0) {
+      prompt += `**Evaluation Criteria:** ${brief.evaluationCriteria.join('; ')}\n`;
+    }
+    prompt += '\n';
+  }
+
+  prompt += `Generate the complete content for the following section:\n\n`;
   prompt += `**Section:** ${sectionTitle}\n`;
   if (sectionDescription) {
     prompt += `**Purpose:** ${sectionDescription}\n`;
   }
 
-  // Add relevant answers (narrowed context)
-  const answerEntries = Object.entries(relevantAnswers || {});
+  // Add full project information
+  const answerEntries = Object.entries(brief).filter(
+    ([key]) => !['projectTitle', 'projectDescription', 'industry', 'timeline', 'requirements', 'evaluationCriteria', 'suggestedSections', 'confidence'].includes(key)
+  );
   if (answerEntries.length > 0) {
-    prompt += `\n**Relevant project information:**\n`;
+    prompt += `\n**Additional project information:**\n`;
     for (const [key, value] of answerEntries) {
-      if (value && value !== '*(Skipped)*') {
+      if (value && value !== '*(Skipped)*' && typeof value === 'string') {
         prompt += `- ${key}: ${value}\n`;
       }
     }
   }
 
-  // Add file context if relevant
   if (fileContext) {
     prompt += `\n**Reference document excerpt:**\n${fileContext.substring(0, 3000)}\n`;
   }
 
-  // Add previous sections summary for continuity
+  // All previous sections with 300-char previews for continuity
   if (previousSections && previousSections.length > 0) {
     prompt += `\n**Already-generated sections (for continuity — do NOT repeat their content):**\n`;
     for (const prev of previousSections) {
-      const preview = prev.content.substring(0, 100).replace(/\n/g, ' ');
-      prompt += `- ${prev.title}: ${preview}...\n`;
+      const preview = prev.content.substring(0, 300).replace(/\n/g, ' ');
+      prompt += `- ${prev.title}: ${preview}${prev.content.length > 300 ? '...' : ''}\n`;
     }
   }
 

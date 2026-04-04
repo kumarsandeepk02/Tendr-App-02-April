@@ -34,6 +34,9 @@ interface UseChatV2Options {
   onMetaUpdate?: (updates: Record<string, string>) => void;
   onStageChange?: (stage: GenerationStage) => void;
   projectId?: string | null;
+  // Document state for enriching agent context
+  sections?: Array<{ id: string; title: string; content: string }>;
+  qualityReview?: QualityReview | null;
 }
 
 const WELCOME_MESSAGES: Record<string, string> = {
@@ -669,7 +672,46 @@ export function useChatV2(options?: UseChatV2Options) {
       const projectTitle = brief?.projectTitle || 'Untitled';
       const agentNames: Record<string, string> = { RFP: 'Nova', RFI: 'Zuno', brainstorm: 'Zia' };
       const agentName = agentNames[docType] || agentNames[currentDocType || ''] || 'Nova';
-      const systemPrompt = `You are ${agentName}, an expert procurement document assistant. The user is working on a ${docType} document titled "${projectTitle}". Help them with any questions or editing instructions. Be conversational — you are a coworker, not a tool. Be concise and helpful.`;
+
+      // Build enriched context from document state
+      let documentContext = '';
+
+      // Brief summary
+      if (brief) {
+        documentContext += '\n\n## Document Brief\n';
+        if (brief.projectDescription) documentContext += `Description: ${brief.projectDescription}\n`;
+        if (brief.requirements?.length) documentContext += `Requirements: ${brief.requirements.slice(0, 5).join('; ')}\n`;
+        if (brief.evaluationCriteria?.length) documentContext += `Evaluation Criteria: ${brief.evaluationCriteria.slice(0, 5).join('; ')}\n`;
+        if (brief.timeline) documentContext += `Timeline: ${brief.timeline}\n`;
+        if (brief.industry) documentContext += `Industry: ${brief.industry}\n`;
+      }
+
+      // Sections overview
+      const sections = optionsRef.current?.sections;
+      if (sections && sections.length > 0) {
+        documentContext += `\n## Document Sections (${sections.length})\n`;
+        for (const s of sections) {
+          const preview = s.content.substring(0, 200).replace(/\n/g, ' ').trim();
+          documentContext += `- **${s.title}**: ${preview}${s.content.length > 200 ? '...' : ''}\n`;
+        }
+      }
+
+      // Quality review
+      const qr = optionsRef.current?.qualityReview;
+      if (qr) {
+        documentContext += `\n## Quality Review\nScore: ${qr.score}/100\n`;
+        if (qr.issues && Array.isArray(qr.issues) && qr.issues.length > 0) {
+          documentContext += `Issues: ${qr.issues.slice(0, 3).map((i: any) => typeof i === 'string' ? i : i.message || i.title || JSON.stringify(i)).join('; ')}\n`;
+        }
+      }
+
+      // Uploaded documents
+      if (uploadedDocuments.length > 0) {
+        documentContext += `\n## Reference Documents\n`;
+        documentContext += uploadedDocuments.map(d => `- ${d.name}`).join('\n') + '\n';
+      }
+
+      const systemPrompt = `You are ${agentName}, an expert procurement document assistant. The user is working on a ${docType} document titled "${projectTitle}". Help them with any questions or editing instructions. Be conversational — you are a coworker, not a tool. Be concise and helpful.${documentContext}`;
 
       try {
         const res = await api.post('/api/chat', {
@@ -683,7 +725,7 @@ export function useChatV2(options?: UseChatV2Options) {
         return 'Sorry, something went wrong. Please try again.';
       }
     },
-    [brief, selectedModel, currentDocType]
+    [brief, selectedModel, currentDocType, uploadedDocuments]
   );
 
   // Reset everything
@@ -699,7 +741,7 @@ export function useChatV2(options?: UseChatV2Options) {
     setIsBriefLoading(false);
   }, []);
 
-  // Restore from saved state
+  // Restore from saved state, optionally injecting document context for the agent
   const restoreChat = useCallback(
     (state: {
       messages: ChatMessage[];
@@ -707,8 +749,34 @@ export function useChatV2(options?: UseChatV2Options) {
       brief?: BriefData | null;
       uploadedDocuments?: UploadedDocument[];
       uploadedFileText?: string;
+    }, documentContext?: {
+      sections?: Array<{ title: string; content: string }>;
+      docType?: string;
+      projectTitle?: string;
+      phase?: string;
     }) => {
-      setMessages(state.messages || []);
+      const restoredMessages = [...(state.messages || [])];
+
+      // Inject a hidden context message so the agent knows the project state
+      if (documentContext && restoredMessages.length > 0) {
+        const sectionList = (documentContext.sections || [])
+          .map(s => s.title)
+          .join(', ');
+        const contextMsg: ChatMessage = {
+          id: 'context-resume-' + Date.now(),
+          role: 'user' as ChatRole,
+          hidden: true,
+          timestamp: Date.now(),
+          content: `[Project resumed. Current state: ${documentContext.docType || 'RFP'} document "${documentContext.projectTitle || 'Untitled'}". ` +
+            `Phase: ${documentContext.phase || 'unknown'}. ` +
+            (sectionList ? `Sections (${documentContext.sections?.length || 0}): ${sectionList}. ` : 'No sections yet. ') +
+            `Brief: ${state.brief ? 'exists' : 'not started'}. ` +
+            `Previous conversation had ${restoredMessages.length} messages.]`,
+        };
+        restoredMessages.unshift(contextMsg);
+      }
+
+      setMessages(restoredMessages);
       setPhase(state.phase || 'landing');
       setBrief(state.brief || null);
       setUploadedDocuments(state.uploadedDocuments || []);
