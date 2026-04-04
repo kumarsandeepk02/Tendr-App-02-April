@@ -2,25 +2,41 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { MessageSquare, X, Send, Loader2, Bot, User, Minimize2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { UnifiedFlowPhase } from '../types';
+import { UnifiedFlowPhase, ToolChatResponse, ToolResult } from '../types';
 
 interface PersistentMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   timestamp: number;
+  toolActions?: string[];
 }
 
 interface PersistentChatProps {
   phase: UnifiedFlowPhase;
   isGenerating: boolean;
-  onSendMessage: (content: string) => Promise<string>;
-  /** Section titles for context hints */
+  onSendMessage: (content: string) => Promise<ToolChatResponse>;
   sectionTitles?: string[];
 }
 
 function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).substr(2, 9);
+}
+
+function formatToolActions(toolResults: ToolResult[]): string[] {
+  return toolResults
+    .filter(tr => tr.mutation)
+    .map(tr => {
+      switch (tr.tool) {
+        case 'rewrite_section': return `Rewrote "${tr.args.sectionTitle}"`;
+        case 'create_section': return `Created "${tr.args.title}"`;
+        case 'delete_section': return `Deleted "${tr.args.sectionTitle}"`;
+        case 'reorder_sections': return 'Reordered sections';
+        case 'update_section_title': return `Renamed "${tr.args.currentTitle}" → "${tr.args.newTitle}"`;
+        default: return null;
+      }
+    })
+    .filter(Boolean) as string[];
 }
 
 const PersistentChat: React.FC<PersistentChatProps> = ({
@@ -82,12 +98,14 @@ const PersistentChat: React.FC<PersistentChatProps> = ({
     setIsTyping(true);
 
     try {
-      const reply = await onSendMessage(content);
+      const response = await onSendMessage(content);
+      const toolActions = formatToolActions(response.toolResults || []);
       const assistantMsg: PersistentMessage = {
         id: generateId(),
         role: 'assistant',
-        content: reply,
+        content: response.content,
         timestamp: Date.now(),
+        toolActions: toolActions.length > 0 ? toolActions : undefined,
       };
       setMessages((prev) => [...prev, assistantMsg]);
 
@@ -233,6 +251,12 @@ const PersistentChat: React.FC<PersistentChatProps> = ({
                           : 'bg-gray-100 text-gray-800'
                       }`}
                     >
+                      {msg.role === 'assistant' && msg.toolActions && msg.toolActions.length > 0 && (
+                        <div className="text-[10px] text-indigo-600 font-medium mb-1 flex items-center gap-1">
+                          <span className="opacity-60">&#9998;</span>
+                          {msg.toolActions.join(' · ')}
+                        </div>
+                      )}
                       {msg.role === 'assistant' ? (
                         <div className="prose prose-sm max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
                           <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
@@ -252,7 +276,7 @@ const PersistentChat: React.FC<PersistentChatProps> = ({
                     <div className="bg-gray-100 rounded-xl px-3 py-2">
                       <div className="flex items-center gap-1">
                         <Loader2 size={12} className="animate-spin text-indigo-600" />
-                        <span className="text-xs text-gray-500">Thinking...</span>
+                        <span className="text-xs text-gray-500">Working on it...</span>
                       </div>
                     </div>
                   </div>

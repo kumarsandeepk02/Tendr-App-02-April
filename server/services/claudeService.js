@@ -200,4 +200,68 @@ async function agentStream(systemPrompt, userPrompt, onText, onDone, { maxTokens
   return fullText;
 }
 
-module.exports = { sendMessage, streamMessage, parseDocumentContext, agentCall, agentStream, SYSTEM_PROMPT, MODELS, DEFAULT_MODEL_KEY, resolveModel };
+/**
+ * Tool-use loop: calls Claude with tools, executes tool_use responses,
+ * feeds results back, repeats until Claude returns final text.
+ */
+async function agentToolLoop(systemPrompt, messages, tools, documentState, config = {}) {
+  const { executeTool, applyMutationToState } = require('./toolDefinitions');
+  const resolvedModel = resolveModel(config.model);
+  const allToolResults = [];
+  let currentMessages = messages.map(m => ({ role: m.role, content: m.content }));
+  const maxIterations = config.maxIterations || 10;
+
+  for (let i = 0; i < maxIterations; i++) {
+    const response = await client.messages.create({
+      model: resolvedModel,
+      max_tokens: config.maxTokens || 4096,
+      temperature: 0.4,
+      system: anchorSystemPrompt(systemPrompt),
+      messages: currentMessages,
+      tools,
+    }, { timeout: 120_000 });
+
+    // If Claude didn't use any tools, extract text and return
+    if (response.stop_reason !== 'tool_use') {
+      const textBlock = response.content.find(b => b.type === 'text');
+      const output = textBlock ? textBlock.text : '';
+      const validation = validateOutput(output);
+      if (!validation.isClean) {
+        logInjectionAttempt({ layer: 'output_validation', flags: validation.flags });
+      }
+      return { content: output, toolResults: allToolResults };
+    }
+
+    // Add assistant message (contains tool_use blocks)
+    currentMessages.push({ role: 'assistant', content: response.content });
+
+    // Execute each tool and build tool_result blocks
+    const toolResultBlocks = [];
+    for (const block of response.content) {
+      if (block.type === 'tool_use') {
+        const { result, mutation } = await executeTool(
+          block.name, block.input, documentState, config
+        );
+
+        if (mutation) applyMutationToState(documentState, mutation);
+
+        allToolResults.push({ tool: block.name, args: block.input, result, mutation: mutation || null });
+
+        toolResultBlocks.push({
+          type: 'tool_result',
+          tool_use_id: block.id,
+          content: result,
+        });
+      }
+    }
+
+    currentMessages.push({ role: 'user', content: toolResultBlocks });
+  }
+
+  return {
+    content: 'I performed several operations but reached the iteration limit. Please check the results.',
+    toolResults: allToolResults,
+  };
+}
+
+module.exports = { sendMessage, streamMessage, parseDocumentContext, agentCall, agentStream, agentToolLoop, SYSTEM_PROMPT, MODELS, DEFAULT_MODEL_KEY, resolveModel };
