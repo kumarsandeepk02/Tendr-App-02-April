@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { DocumentState, ModelOption } from '../types';
 import { exportToDocx } from '../utils/exportDocx';
 import { exportToPdf } from '../utils/exportPdf';
+import { exportToXlsx } from '../utils/exportXlsx';
 import ModelSelector from './ModelSelector';
 import {
   FileDown,
@@ -33,6 +34,7 @@ const Toolbar: React.FC<ToolbarProps> = ({
 }) => {
   const [exportingDocx, setExportingDocx] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
+  const [exportingXlsx, setExportingXlsx] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
 
   const hasContent = documentState.sections.some(
@@ -64,6 +66,19 @@ const Toolbar: React.FC<ToolbarProps> = ({
       setExportError('Failed to export PDF.');
     } finally {
       setExportingPdf(false);
+    }
+  };
+
+  const handleExportXlsx = async () => {
+    setExportingXlsx(true);
+    setExportError(null);
+    try {
+      await exportToXlsx(documentState);
+      onExportComplete();
+    } catch (err: any) {
+      setExportError('Failed to export Excel.');
+    } finally {
+      setExportingXlsx(false);
     }
   };
 
@@ -117,6 +132,15 @@ const Toolbar: React.FC<ToolbarProps> = ({
         >
           {exportingPdf ? <Loader2 size={13} className="animate-spin" /> : <FileDown size={13} />}
           PDF
+        </button>
+
+        <button
+          onClick={handleExportXlsx}
+          disabled={exportDisabled || exportingXlsx}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-white border border-slate-200 text-slate-600 rounded-full hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+        >
+          {exportingXlsx ? <Loader2 size={13} className="animate-spin" /> : <FileDown size={13} />}
+          Excel
         </button>
 
         <div className="w-px h-5 bg-slate-200 mx-1" />

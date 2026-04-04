@@ -110,7 +110,7 @@ const TOOL_SCHEMAS = [
     input_schema: {
       type: 'object',
       properties: {
-        format: { type: 'string', enum: ['docx', 'pdf'], description: 'Export format.' },
+        format: { type: 'string', enum: ['docx', 'pdf', 'xlsx'], description: 'Export format.' },
       },
       required: ['format'],
     },
@@ -278,8 +278,8 @@ async function executeTool(toolName, toolInput, documentState, config) {
 
     case 'export_document': {
       const format = toolInput.format;
-      if (!['docx', 'pdf'].includes(format)) {
-        return { result: 'Invalid format. Use "docx" or "pdf".' };
+      if (!['docx', 'pdf', 'xlsx'].includes(format)) {
+        return { result: 'Invalid format. Use "docx", "pdf", or "xlsx".' };
       }
       return {
         result: `Export to ${format.toUpperCase()} triggered. The file will download in the user's browser.`,

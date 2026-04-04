@@ -19,6 +19,7 @@
     "autoprefixer": "^10.4.24",
     "axios": "^1.13.5",
     "docx": "^9.5.3",
+    "exceljs": "^4.4.0",
     "file-saver": "^2.0.5",
     "html2canvas": "^1.4.1",
     "jspdf": "^4.2.0",

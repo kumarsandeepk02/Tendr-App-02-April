@@ -1,11 +1,59 @@
 const { generateOutline } = require('./agents/outlineArchitect');
-const { writeSection } = require('./agents/sectionWriter');
+const { writeSection, regenerateSection } = require('./agents/sectionWriter');
 const { reviewDocument } = require('./agents/qualityReviewer');
 const { analyzeDocuments } = require('./agents/documentAnalyzer');
 const { generateCompetitiveIntel } = require('./agents/competitiveIntelAgent');
+const { agentCall } = require('./claudeService');
 
 // Circuit breaker: max total output tokens (approximate via character count)
 const MAX_TOTAL_CHARS = 100000; // ~25k tokens
+
+const SELF_EVAL_PROMPT = `You are a procurement document quality reviewer. Evaluate this section and return ONLY a JSON object:
+{
+  "pass": true/false,
+  "issues": ["issue 1", "issue 2"] or [],
+  "instruction": "specific rewrite instruction if pass=false" or null
+}
+
+Check for:
+- Vague language ("appropriate", "as needed", "robust") — flag as fail
+- Missing specifics where quantities, timelines, or SLAs should be stated
+- Repetition of content from previous sections
+- Procurement language: "shall" for mandatory, "should" for preferred, "may" for optional
+- Section too short (< 50 words for a narrative section) or bloated (> 700 words)
+
+If the section is adequate, return {"pass": true, "issues": [], "instruction": null}.
+Be strict but fair. Only fail sections with clear, fixable problems.
+Return ONLY the JSON.`;
+
+/**
+ * Quick per-section quality check. Returns null if pass, or a rewrite instruction if fail.
+ */
+async function evaluateSection(sectionTitle, sectionContent, previousSections, model) {
+  try {
+    let prompt = `## ${sectionTitle}\n${sectionContent}\n`;
+    if (previousSections.length > 0) {
+      prompt += `\nPrevious sections (for repetition check): ${previousSections.map(s => s.title).join(', ')}`;
+    }
+
+    const response = await agentCall(SELF_EVAL_PROMPT, prompt, {
+      maxTokens: 300,
+      temperature: 0.1,
+      model: 'haiku', // Fast + cheap for eval
+    });
+
+    const jsonStr = response.replace(/```json?\s*/g, '').replace(/```/g, '').trim();
+    const result = JSON.parse(jsonStr);
+    if (result.pass === false && result.instruction) {
+      return result.instruction;
+    }
+    return null;
+  } catch (err) {
+    // Eval failure is non-blocking — skip self-correction
+    console.warn(`Self-eval failed for "${sectionTitle}":`, err.message);
+    return null;
+  }
+}
 
 /**
  * Run the multi-agent pipeline for document generation.
@@ -83,10 +131,41 @@ async function runPipeline(config, callbacks) {
           null // onDone handled below
         );
 
-        completedSections.push({ title: section.title, content: sectionContent });
-        fullDocument += sectionContent + '\n\n';
+        // Self-eval: check section quality and rewrite if needed (one attempt)
+        let finalContent = sectionContent;
+        const rewriteInstruction = await evaluateSection(
+          section.title, sectionContent, completedSections, model
+        );
+        if (rewriteInstruction) {
+          console.log(`Self-eval: rewriting "${section.title}" — ${rewriteInstruction}`);
+          try {
+            const rewritten = await regenerateSection(
+              {
+                sectionTitle: section.title,
+                currentContent: sectionContent,
+                instruction: rewriteInstruction,
+                docType,
+                answers,
+                fileContext: fileContext || '',
+                model,
+              },
+              () => {},
+              () => {}
+            );
+            if (rewritten && rewritten.length > 50) {
+              finalContent = `## ${section.title}\n\n${rewritten}`;
+              // Re-emit the corrected content so the frontend gets the update
+              if (onText) onText(`\n<!-- self-corrected -->\n`);
+            }
+          } catch (rewriteErr) {
+            console.warn(`Self-eval rewrite failed for "${section.title}":`, rewriteErr.message);
+          }
+        }
 
-        if (onSectionDone) onSectionDone(section.title, sectionContent);
+        completedSections.push({ title: section.title, content: finalContent });
+        fullDocument += finalContent + '\n\n';
+
+        if (onSectionDone) onSectionDone(section.title, finalContent);
       } catch (sectionErr) {
         console.error(`Section Writer failed for "${section.title}":`, sectionErr.message);
         const placeholder = `## ${section.title}\n\n[Generation failed — please write this section manually]\n\n`;
