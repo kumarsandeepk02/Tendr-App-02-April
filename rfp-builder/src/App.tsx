@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useMemo } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { V2Phase, ToolMutation, DocumentSection } from './types';
 import { useChatV2 } from './hooks/useChatV2';
 import { useDocument } from './hooks/useDocument';
@@ -56,6 +56,10 @@ function App() {
   const [createDialogMode, setCreateDialogMode] = useState<'folder' | 'document' | null>(null);
   const [createDialogPresets, setCreateDialogPresets] = useState<{ docType?: string; folderId?: string }>({});
 
+  // Pending export (triggered by agent tool)
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [pendingExport, setPendingExport] = useState<string | null>(null);
+
   // Document state
   const {
     documentState,
@@ -101,6 +105,9 @@ function App() {
     findSectionByTitle,
   } = useDocument(activeProjectId);
 
+  // Ref for updateBrief (resolved after useChatV2 initializes, avoids circular dep)
+  const updateBriefRef = useRef<((updates: Record<string, any>) => void) | null>(null);
+
   // Handle tool mutations from the agent (tool_use results)
   const handleToolMutations = useCallback((mutations: ToolMutation[]) => {
     for (const mutation of mutations) {
@@ -135,9 +142,36 @@ function App() {
           if (section) updateSection(section.id, { title: mutation.newTitle! });
           break;
         }
+        case 'update_brief': {
+          if (mutation.field && mutation.value !== undefined) {
+            updateBriefRef.current?.({ [mutation.field]: mutation.value });
+          }
+          break;
+        }
+        case 'set_format': {
+          const section = findSectionByTitle(mutation.sectionTitle || '');
+          if (section) {
+            updateSection(section.id, {
+              outputFormat: mutation.format as any,
+              formatMetadata: mutation.reason ? { reason: mutation.reason } : undefined,
+            });
+          }
+          break;
+        }
+        case 'trigger_export': {
+          // Store export request — Toolbar picks it up
+          setPendingExport(mutation.format || 'docx');
+          break;
+        }
+        case 'switch_doc_type': {
+          if (mutation.docType) {
+            updateMeta({ type: mutation.docType } as any);
+          }
+          break;
+        }
       }
     }
-  }, [findSectionByTitle, updateSection, addSection, removeSection, reorderSections, documentState.sections]);
+  }, [findSectionByTitle, updateSection, addSection, removeSection, reorderSections, documentState.sections, updateMeta]);
 
   // V2 Chat options
   const chatOptions = useMemo(
@@ -204,6 +238,9 @@ function App() {
     selectedModel,
     setSelectedModel,
   } = useChatV2(chatOptions);
+
+  // Wire updateBrief ref now that useChatV2 is initialized
+  updateBriefRef.current = updateBrief;
 
   // Sync project metadata
   useEffect(() => {
