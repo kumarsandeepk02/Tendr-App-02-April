@@ -119,8 +119,10 @@ function App() {
       onCompetitiveIntel: handleCompetitiveIntel,
       onStageChange: handleStageChange,
       projectId: activeProjectId,
+      sections: documentState.sections,
+      qualityReview,
     }),
-    [updateMeta, handleStreamStart, handleStreamChunk, handleStreamDone, handleSectionStart, handleSectionDone, handleReviewResult, handleSectionRegenerationStart, handleSectionRegenerationDone, handleDocumentAnalysis, handleCompetitiveIntel, handleStageChange, activeProjectId]
+    [updateMeta, handleStreamStart, handleStreamChunk, handleStreamDone, handleSectionStart, handleSectionDone, handleReviewResult, handleSectionRegenerationStart, handleSectionRegenerationDone, handleDocumentAnalysis, handleCompetitiveIntel, handleStageChange, activeProjectId, documentState.sections, qualityReview]
   );
 
   // V2 Chat state
@@ -250,7 +252,14 @@ function App() {
         (targetDraft.chatState?.messages?.length > 0 ||
           targetDraft.documentState?.sections?.some((s: any) => s.content.trim()))
       ) {
-        restoreChat(targetDraft.chatState as any);
+        // Pass document context so the agent knows the project state on resume
+        const docContext = targetDraft.documentState ? {
+          sections: targetDraft.documentState.sections?.filter((s: any) => s.content.trim()),
+          docType: targetDraft.documentState.meta?.type,
+          projectTitle: targetDraft.documentState.meta?.projectTitle,
+          phase: targetDraft.chatState?.phase,
+        } : undefined;
+        restoreChat(targetDraft.chatState as any, docContext);
         restoreDocument(targetDraft.documentState);
       } else {
         resetChat();

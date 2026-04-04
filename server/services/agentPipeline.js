@@ -59,27 +59,18 @@ async function runPipeline(config, callbacks) {
       // Emit section start
       if (onSectionStart) onSectionStart(section.title, i, total);
 
-      // Narrow context: only include answers for this section's contextKeys
-      const relevantAnswers = {};
-      const keys = section.contextKeys || [];
-      for (const key of keys) {
-        if (answers && answers[key]) {
-          relevantAnswers[key] = answers[key];
-        }
-      }
-      // Always include doc_type and project_title for context
-      if (answers?.doc_type) relevantAnswers.doc_type = answers.doc_type;
-      if (answers?.project_title) relevantAnswers.project_title = answers.project_title;
-
+      // Pass the full answers/brief to every section — don't filter by contextKeys.
+      // contextKeys are still on the outline metadata for the outline architect's use,
+      // but the section writer benefits from seeing the full project context.
       try {
         const sectionContent = await writeSection(
           {
             sectionTitle: section.title,
             sectionDescription: section.description,
-            relevantAnswers,
-            fileContext: keys.length === 0 ? fileContext : undefined, // Only pass file context if no specific keys
+            relevantAnswers: answers,
+            fileContext: fileContext || undefined,
             docType,
-            previousSections: completedSections.slice(-3), // Last 3 sections for continuity
+            previousSections: completedSections, // All previous sections for continuity
             industryProfile: industry,
             estimatedLength: section.estimatedLength,
             responseType: section.responseType || 'narrative',
