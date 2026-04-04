@@ -20,7 +20,11 @@ export type ToolMutationType =
   | 'create_section'
   | 'delete_section'
   | 'reorder_sections'
-  | 'update_section_title';
+  | 'update_section_title'
+  | 'update_brief'
+  | 'trigger_export'
+  | 'switch_doc_type'
+  | 'set_format';
 
 export interface ToolMutation {
   type: ToolMutationType;
@@ -31,6 +35,11 @@ export interface ToolMutation {
   currentTitle?: string;
   newTitle?: string;
   sectionTitles?: string[];
+  field?: string;
+  value?: any;
+  format?: string;
+  reason?: string;
+  docType?: string;
 }
 
 export interface ToolResult {
@@ -76,12 +85,16 @@ export interface ChatState {
 
 // ===================== Document Types =====================
 
+export type SectionOutputFormat = 'narrative' | 'table' | 'scoring_matrix' | 'checklist' | 'timeline' | 'comparison_table';
+
 export interface DocumentSection {
   id: string;
   title: string;
   content: string;
   order: number;
   isEditing?: boolean;
+  outputFormat?: SectionOutputFormat;
+  formatMetadata?: { reason?: string };
 }
 
 export type DocumentType = 'RFI' | 'RFP';

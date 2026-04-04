@@ -86,6 +86,58 @@ const TOOL_SCHEMAS = [
       required: [],
     },
   },
+  {
+    name: 'update_brief',
+    description: 'Update a field in the project brief. Use this when the user wants to change project details like title, description, requirements, evaluation criteria, timeline, or industry.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        field: {
+          type: 'string',
+          enum: ['projectTitle', 'projectDescription', 'requirements', 'evaluationCriteria', 'timeline', 'industry', 'additionalContext'],
+          description: 'The brief field to update.',
+        },
+        value: {
+          description: 'New value. String for most fields, array of strings for requirements and evaluationCriteria.',
+        },
+      },
+      required: ['field', 'value'],
+    },
+  },
+  {
+    name: 'export_document',
+    description: 'Trigger document export to Word (DOCX) or PDF format. The export will be downloaded by the user.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        format: { type: 'string', enum: ['docx', 'pdf'], description: 'Export format.' },
+      },
+      required: ['format'],
+    },
+  },
+  {
+    name: 'switch_doc_type',
+    description: 'Change the document type between RFP, RFI, and brainstorm. This affects the agent persona and generation strategy.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        docType: { type: 'string', enum: ['RFP', 'RFI', 'brainstorm'], description: 'The new document type.' },
+      },
+      required: ['docType'],
+    },
+  },
+  {
+    name: 'recommend_format',
+    description: 'Recommend the best output format for a section based on its content type. Use this when creating or rewriting sections that might benefit from a non-prose format (table, checklist, scoring matrix, etc.).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        sectionTitle: { type: 'string', description: 'Title of the section to analyze.' },
+        contentDescription: { type: 'string', description: 'Brief description of what this section contains.' },
+      },
+      required: ['sectionTitle'],
+    },
+  },
 ];
 
 // ── Fuzzy section title matcher ────────────────────────────────────────────
@@ -211,6 +263,74 @@ async function executeTool(toolName, toolInput, documentState, config) {
       return { result: context || 'No document context available.' };
     }
 
+    case 'update_brief': {
+      const field = toolInput.field;
+      const value = toolInput.value;
+      const validFields = ['projectTitle', 'projectDescription', 'requirements', 'evaluationCriteria', 'timeline', 'industry', 'additionalContext'];
+      if (!validFields.includes(field)) {
+        return { result: `Invalid brief field "${field}". Valid fields: ${validFields.join(', ')}` };
+      }
+      return {
+        result: `Updated brief field "${field}".`,
+        mutation: { type: 'update_brief', field, value },
+      };
+    }
+
+    case 'export_document': {
+      const format = toolInput.format;
+      if (!['docx', 'pdf'].includes(format)) {
+        return { result: 'Invalid format. Use "docx" or "pdf".' };
+      }
+      return {
+        result: `Export to ${format.toUpperCase()} triggered. The file will download in the user's browser.`,
+        mutation: { type: 'trigger_export', format },
+      };
+    }
+
+    case 'switch_doc_type': {
+      const docType = toolInput.docType;
+      if (!['RFP', 'RFI', 'brainstorm'].includes(docType)) {
+        return { result: 'Invalid document type. Use "RFP", "RFI", or "brainstorm".' };
+      }
+      return {
+        result: `Switched document type to ${docType}.`,
+        mutation: { type: 'switch_doc_type', docType },
+      };
+    }
+
+    case 'recommend_format': {
+      const section = findSection(sections, toolInput.sectionTitle);
+      const sectionContent = section ? section.content : '';
+      const desc = toolInput.contentDescription || section?.title || '';
+
+      // Heuristic format recommendation based on content patterns
+      let format = 'narrative';
+      let reason = 'Standard prose format works well for this section.';
+
+      const lower = (desc + ' ' + sectionContent).toLowerCase();
+      if (/pric(e|ing)|cost|budget|fee|rate/i.test(lower)) {
+        format = 'table';
+        reason = 'Pricing/cost content is best presented as a structured table for easy comparison.';
+      } else if (/evaluat|scor|criteria|weight|rating/i.test(lower)) {
+        format = 'scoring_matrix';
+        reason = 'Evaluation criteria with weights work best as a scoring matrix.';
+      } else if (/checklist|compliance|requirement.*list|must.*have/i.test(lower)) {
+        format = 'checklist';
+        reason = 'Compliance/requirements lists are clearest as a checklist format.';
+      } else if (/timeline|schedule|milestone|phase|deadline/i.test(lower)) {
+        format = 'timeline';
+        reason = 'Timeline/milestone content is best visualized as a structured timeline.';
+      } else if (/compar|versus|vs\.|option|alternative/i.test(lower)) {
+        format = 'comparison_table';
+        reason = 'Comparison content benefits from a side-by-side table format.';
+      }
+
+      return {
+        result: `Recommended format for "${toolInput.sectionTitle}": ${format}. ${reason}`,
+        mutation: section ? { type: 'set_format', sectionTitle: section.title, format, reason } : null,
+      };
+    }
+
     default:
       return { result: `Unknown tool: ${toolName}` };
   }
@@ -254,6 +374,18 @@ function applyMutationToState(documentState, mutation) {
       if (idx >= 0) sections[idx] = { ...sections[idx], title: mutation.newTitle };
       break;
     }
+    case 'update_brief': {
+      if (documentState.brief) {
+        documentState.brief[mutation.field] = mutation.value;
+      }
+      break;
+    }
+    case 'set_format': {
+      const idx = sections.findIndex(s => s.title.toLowerCase() === mutation.sectionTitle.toLowerCase());
+      if (idx >= 0) sections[idx] = { ...sections[idx], outputFormat: mutation.format };
+      break;
+    }
+    // trigger_export and switch_doc_type are frontend-only mutations — no server state to update
   }
 }
 

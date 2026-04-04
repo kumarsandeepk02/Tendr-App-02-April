@@ -33,6 +33,10 @@ function formatToolActions(toolResults: ToolResult[]): string[] {
         case 'delete_section': return `Deleted "${tr.args.sectionTitle}"`;
         case 'reorder_sections': return 'Reordered sections';
         case 'update_section_title': return `Renamed "${tr.args.currentTitle}" → "${tr.args.newTitle}"`;
+        case 'update_brief': return `Updated brief: ${tr.args.field}`;
+        case 'export_document': return `Exporting as ${(tr.args.format || '').toUpperCase()}`;
+        case 'switch_doc_type': return `Switched to ${tr.args.docType}`;
+        case 'recommend_format': return `Format: ${tr.args.sectionTitle} → ${tr.result?.split(':')[1]?.trim()?.split('.')[0] || 'recommended'}`;
         default: return null;
       }
     })
