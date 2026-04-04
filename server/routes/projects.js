@@ -27,6 +27,8 @@ router.get('/', async (req, res) => {
       .where(and(...conditions))
       .orderBy(desc(projects.updatedAt));
 
+    const includeBriefs = req.query.includeBriefs === 'true';
+
     const result = rows.map((p) => ({
       id: p.id,
       title: p.title,
@@ -36,6 +38,17 @@ router.get('/', async (req, res) => {
       folderId: p.folderId || null,
       createdAt: new Date(p.createdAt).getTime(),
       updatedAt: new Date(p.updatedAt).getTime(),
+      ...(includeBriefs && p.briefData ? {
+        briefData: {
+          projectTitle: p.briefData.projectTitle,
+          projectDescription: p.briefData.projectDescription,
+          docType: p.briefData.docType,
+          industry: p.briefData.industry,
+          requirements: p.briefData.requirements,
+          evaluationCriteria: p.briefData.evaluationCriteria,
+          timeline: p.briefData.timeline,
+        },
+      } : {}),
     }));
 
     res.json({ projects: result });

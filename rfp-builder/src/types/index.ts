@@ -24,7 +24,8 @@ export type ToolMutationType =
   | 'update_brief'
   | 'trigger_export'
   | 'switch_doc_type'
-  | 'set_format';
+  | 'set_format'
+  | 'create_document';
 
 export interface ToolMutation {
   type: ToolMutationType;
@@ -40,6 +41,9 @@ export interface ToolMutation {
   format?: string;
   reason?: string;
   docType?: string;
+  projectId?: string;
+  documentType?: string;
+  folderId?: string;
 }
 
 export interface ToolResult {

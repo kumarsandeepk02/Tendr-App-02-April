@@ -53,6 +53,7 @@ function App() {
     switchProject,
     deleteProject,
     syncProjectMeta,
+    fetchFolderDocs,
   } = useProjects();
 
   // Creation dialog state
@@ -172,9 +173,21 @@ function App() {
           }
           break;
         }
+        case 'create_document': {
+          if (mutation.title && mutation.documentType) {
+            createProject({
+              title: mutation.title,
+              documentType: mutation.documentType,
+              folderId: mutation.folderId,
+            });
+            // Refresh folders to update document counts
+            refreshFolders();
+          }
+          break;
+        }
       }
     }
-  }, [findSectionByTitle, updateSection, addSection, removeSection, reorderSections, documentState.sections, updateMeta]);
+  }, [findSectionByTitle, updateSection, addSection, removeSection, reorderSections, documentState.sections, updateMeta, createProject, refreshFolders]);
 
   // V2 Chat options
   const chatOptions = useMemo(
@@ -295,14 +308,30 @@ function App() {
     await createFolder(name, description);
   }, [createFolder]);
 
-  const handleCreateDocument = useCallback((title: string, documentType: string, folderId?: string) => {
+  const handleCreateDocument = useCallback(async (title: string, documentType: string, folderId?: string) => {
     createProject({ title, documentType, folderId });
     resetChat();
     resetDocument();
     setIsFullPageEdit(false);
-    // Start planning with the selected doc type
-    setTimeout(() => startPlanning(documentType as any), 100);
-  }, [createProject, resetChat, resetDocument, startPlanning]);
+
+    // Fetch sibling docs for cross-document context
+    let folderContext: { siblingDocs: Array<{ title: string; documentType: string; briefSummary: string }> } | undefined;
+    if (folderId) {
+      const siblings = await fetchFolderDocs(folderId);
+      const siblingDocs = siblings
+        .filter(d => d.briefData) // Only docs with briefs
+        .map(d => ({
+          title: d.title,
+          documentType: d.documentType,
+          briefSummary: d.briefData?.projectDescription || d.briefData?.projectTitle || d.title,
+        }));
+      if (siblingDocs.length > 0) {
+        folderContext = { siblingDocs };
+      }
+    }
+
+    setTimeout(() => startPlanning(documentType as any, folderContext), 100);
+  }, [createProject, resetChat, resetDocument, startPlanning, fetchFolderDocs]);
 
   const handleDeleteFolder = useCallback((folderId: string) => {
     if (!window.confirm('Delete this project folder? Documents inside will become standalone.')) return;

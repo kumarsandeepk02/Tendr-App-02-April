@@ -254,10 +254,13 @@ const CompletionCard: React.FC<{
   const scoreColor = score ? (score >= 80 ? 'bg-green-500' : score >= 60 ? 'bg-yellow-500' : 'bg-red-500') : 'bg-gray-400';
   const issueCount = qualityReview?.issues?.length || 0;
 
-  const companion = docType?.toUpperCase() === 'RFP'
-    ? 'Add an RFI to explore vendors first?'
-    : docType?.toUpperCase() === 'RFI'
-    ? 'Ready to build the full RFP?'
+  // Procurement workflow: RFI → RFP → Contract (never backwards)
+  const companion = docType?.toUpperCase() === 'RFI'
+    ? 'Ready to build the full RFP based on what you learned?'
+    : docType?.toUpperCase() === 'RFP'
+    ? 'Need an evaluation matrix or SOW to go with this?'
+    : docType?.toLowerCase() === 'brainstorm'
+    ? 'Ready to formalize this into an RFP or RFI?'
     : null;
 
   return (

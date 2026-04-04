@@ -139,10 +139,28 @@ export function useChatV2(options?: UseChatV2Options) {
 
   // Start the V2 flow from a landing action card
   const startPlanning = useCallback(
-    (docType?: 'RFP' | 'RFI') => {
+    (docType?: 'RFP' | 'RFI', folderContext?: { siblingDocs: Array<{ title: string; documentType: string; briefSummary: string }> }) => {
       setPhase('planning');
-      setMessages([]);
       setCurrentDocType(docType || 'brainstorm');
+
+      // Build initial messages — optionally with cross-document context
+      const initialMessages: ChatMessage[] = [];
+
+      if (folderContext && folderContext.siblingDocs.length > 0) {
+        const contextLines = folderContext.siblingDocs.map(
+          d => `- "${d.title}" (${d.documentType}): ${d.briefSummary}`
+        ).join('\n');
+
+        initialMessages.push({
+          id: generateId(),
+          role: 'user' as ChatRole,
+          content: `[This project folder contains related documents:\n${contextLines}\nAlign this new document with the context above where relevant.]`,
+          timestamp: Date.now(),
+          hidden: true,
+        });
+      }
+
+      setMessages(initialMessages);
 
       const welcomeContent = docType
         ? WELCOME_MESSAGES[docType]
@@ -682,7 +700,8 @@ You have tools to directly modify the document. Use them when the user asks to e
 - Use rewrite_section for content changes. Do NOT output rewritten content as text — use the tool.
 - After using a tool, briefly confirm what you did. Don't repeat the full content.
 - You may call multiple tools in sequence for complex requests.
-- For read-only questions about the document, answer from the context you already have. Only use read_section if you need the full content of a specific section.`;
+- For read-only questions about the document, answer from the context you already have. Only use read_section if you need the full content of a specific section.
+- Use create_document when the user wants a companion document. Procurement workflow: RFI → RFP → Contract. After an RFI, suggest building the full RFP. After an RFP, suggest evaluation matrix or SOW. Never suggest going backwards (RFP → RFI).`;
 
       // Build document state to send to the server
       const sections = optionsRef.current?.sections || [];
