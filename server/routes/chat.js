@@ -9,6 +9,7 @@ const { generateCompetitiveIntel } = require('../services/agents/competitiveInte
 const { planningChat, generateBrief, generateNarrations } = require('../services/agents/planningAgent');
 const { getAgent } = require('../services/agents/orchestrators/agentDefinitions');
 const { reviewReadiness } = require('../services/agents/readinessReviewer');
+const { validate, chatSchema, toolChatSchema, planningChatSchema, briefSchema, pipelineSchema, regenerateSectionSchema } = require('../middleware/validate');
 
 // GET available models
 router.get('/models', (req, res) => {
@@ -23,13 +24,9 @@ router.get('/models', (req, res) => {
   res.json({ models, default: DEFAULT_MODEL_KEY });
 });
 
-router.post('/', async (req, res) => {
+router.post('/', validate(chatSchema), async (req, res) => {
   try {
     const { messages, systemPrompt, model } = req.body;
-
-    if (!messages || !Array.isArray(messages) || messages.length === 0) {
-      return res.status(400).json({ error: 'Messages array is required' });
-    }
 
     const content = await sendMessage(messages, systemPrompt, { model });
     res.json({ content });
@@ -42,16 +39,9 @@ router.post('/', async (req, res) => {
 });
 
 // Tool-enabled chat — server-side tool_use loop
-router.post('/tools', async (req, res) => {
+router.post('/tools', validate(toolChatSchema), async (req, res) => {
   try {
     const { messages, systemPrompt, documentState, model } = req.body;
-
-    if (!messages || !Array.isArray(messages) || messages.length === 0) {
-      return res.status(400).json({ error: 'Messages array is required' });
-    }
-    if (!documentState) {
-      return res.status(400).json({ error: 'documentState is required' });
-    }
 
     const { profileId, tenantId } = req.auth || {};
     const result = await agentToolLoop(
@@ -78,13 +68,9 @@ router.post('/tools', async (req, res) => {
 });
 
 // Section regeneration SSE endpoint (shared by section regen + quality review fix)
-router.post('/regenerate-section', async (req, res) => {
+router.post('/regenerate-section', validate(regenerateSectionSchema), async (req, res) => {
   try {
     const { sectionTitle, currentContent, instruction, docType, answers, fileContext, model } = req.body;
-
-    if (!sectionTitle || !instruction) {
-      return res.status(400).json({ error: 'sectionTitle and instruction are required' });
-    }
 
     // Set SSE headers
     res.setHeader('Content-Type', 'text/event-stream');
@@ -165,13 +151,9 @@ router.post('/competitive-intel', async (req, res) => {
 
 // V2: Planning Agent chat — freeform conversation to gather project context
 // Accepts docType to select the right agent personality (Nova/Zuno/Zia)
-router.post('/v2/planning', async (req, res) => {
+router.post('/v2/planning', validate(planningChatSchema), async (req, res) => {
   try {
     const { messages, fileContext, model, docType } = req.body;
-
-    if (!messages || !Array.isArray(messages) || messages.length === 0) {
-      return res.status(400).json({ error: 'Messages array is required' });
-    }
 
     const content = await planningChat({ messages, fileContext, model, docType });
     res.json({ content });
@@ -184,13 +166,9 @@ router.post('/v2/planning', async (req, res) => {
 });
 
 // V2: Generate structured brief from planning conversation
-router.post('/v2/brief', async (req, res) => {
+router.post('/v2/brief', validate(briefSchema), async (req, res) => {
   try {
     const { messages, fileContext, model } = req.body;
-
-    if (!messages || !Array.isArray(messages) || messages.length === 0) {
-      return res.status(400).json({ error: 'Messages array is required' });
-    }
 
     const brief = await generateBrief({ messages, fileContext, model });
     res.json(brief);
@@ -228,13 +206,9 @@ router.post('/v2/readiness', async (req, res) => {
 });
 
 // V2: Pipeline with narration events (uses existing pipeline but adds narration SSE events)
-router.post('/v2/pipeline', async (req, res) => {
+router.post('/v2/pipeline', validate(pipelineSchema), async (req, res) => {
   try {
     const { brief, fileContext, confirmedSections, uploadedDocuments, planningMessages, model } = req.body;
-
-    if (!brief) {
-      return res.status(400).json({ error: 'brief is required' });
-    }
 
     // Convert brief to answers format for pipeline compatibility
     const answers = {

@@ -3,6 +3,7 @@ const { db } = require('../db');
 const { projects, documentSections, qualityReviews, competitiveIntel, documentAnalyses } = require('../db/schema');
 const { getAuth } = require('../middleware/auth');
 const { eq, and, desc, isNull } = require('drizzle-orm');
+const { validate, createProjectSchema, updateProjectSchema, updateSectionsSchema } = require('../middleware/validate');
 
 const router = express.Router();
 
@@ -61,7 +62,7 @@ router.get('/', async (req, res) => {
 /**
  * POST /api/projects
  */
-router.post('/', async (req, res) => {
+router.post('/', validate(createProjectSchema), async (req, res) => {
   try {
     const { profileId, tenantId } = getAuth(req);
     const { title, documentType, folderId } = req.body;
@@ -172,7 +173,7 @@ router.get('/:id', async (req, res) => {
 /**
  * PATCH /api/projects/:id
  */
-router.patch('/:id', async (req, res) => {
+router.patch('/:id', validate(updateProjectSchema), async (req, res) => {
   try {
     const { profileId, tenantId } = getAuth(req);
     const { id } = req.params;
@@ -249,7 +250,7 @@ router.delete('/:id', async (req, res) => {
 /**
  * PATCH /api/projects/:id/sections
  */
-router.patch('/:id/sections', async (req, res) => {
+router.patch('/:id/sections', validate(updateSectionsSchema), async (req, res) => {
   try {
     const { profileId, tenantId } = getAuth(req);
     const { id } = req.params;
@@ -266,10 +267,6 @@ router.patch('/:id/sections', async (req, res) => {
 
     if (!project) {
       return res.status(404).json({ error: 'Project not found' });
-    }
-
-    if (!Array.isArray(sectionData)) {
-      return res.status(400).json({ error: 'sections must be an array' });
     }
 
     await db.transaction(async (tx) => {

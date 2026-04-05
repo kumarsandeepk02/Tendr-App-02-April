@@ -439,6 +439,20 @@ const chatConversations = pgTable(
   ]
 );
 
+// ── OAuth States (replaces in-memory Map for auth state/exchange codes) ───
+const oauthStates = pgTable(
+  'oauth_states',
+  {
+    key: varchar('key', { length: 255 }).primaryKey(),
+    data: jsonb('data').notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_oauth_states_expires').on(table.expiresAt),
+  ]
+);
+
 module.exports = {
   // Enums
   documentTypeEnum,
@@ -467,4 +481,5 @@ module.exports = {
   auditLogs,
   externalIdentities,
   chatConversations,
+  oauthStates,
 };

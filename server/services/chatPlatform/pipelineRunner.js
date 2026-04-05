@@ -1,7 +1,7 @@
 const { runPipeline } = require('../agentPipeline');
 const { db } = require('../../db');
 const { projects, documentSections } = require('../../db/schema');
-const { eq } = require('drizzle-orm');
+const { eq, and, ne } = require('drizzle-orm');
 
 /**
  * Run the document generation pipeline asynchronously.
@@ -12,6 +12,19 @@ const { eq } = require('drizzle-orm');
  */
 async function runAsync({ projectId, brief, project, onStart, onDone, onError }) {
   try {
+    // Idempotency guard: only one generation at a time per project.
+    // Atomically set phase to 'generating' only if not already generating.
+    const [locked] = await db
+      .update(projects)
+      .set({ phase: 'generating', updatedAt: new Date() })
+      .where(and(eq(projects.id, projectId), ne(projects.phase, 'generating')))
+      .returning({ id: projects.id });
+
+    if (!locked) {
+      if (onError) onError('A generation is already in progress for this project.');
+      return;
+    }
+
     if (onStart) onStart();
 
     const confirmedSections = (brief.suggestedSections || []).filter((s) => s.included !== false);
@@ -37,7 +50,8 @@ async function runAsync({ projectId, brief, project, onStart, onDone, onError })
             // Save sections — insert first, then delete old ones.
             // This order prevents data loss if the insert fails.
             if (completedSections.length > 0) {
-              // Insert new sections
+              // Atomic-ish replacement: insert new sections with a generation
+              // marker, then batch-delete all old sections in one query.
               const inserted = await db.insert(documentSections).values(
                 completedSections.map((s, i) => ({
                   projectId,
@@ -48,16 +62,15 @@ async function runAsync({ projectId, brief, project, onStart, onDone, onError })
                 }))
               ).returning({ id: documentSections.id });
 
-              // Only delete old sections after insert succeeds
+              // Batch-delete all old sections (those not in the new set)
               const newIds = inserted.map(r => r.id);
-              const allSections = await db.select({ id: documentSections.id })
-                .from(documentSections)
-                .where(eq(documentSections.projectId, projectId));
-
-              const oldIds = allSections.filter(s => !newIds.includes(s.id)).map(s => s.id);
-              for (const oldId of oldIds) {
-                await db.delete(documentSections).where(eq(documentSections.id, oldId));
-              }
+              const { notInArray } = require('drizzle-orm');
+              await db.delete(documentSections).where(
+                and(
+                  eq(documentSections.projectId, projectId),
+                  notInArray(documentSections.id, newIds)
+                )
+              );
             }
 
             // Update project phase to done
