@@ -15,6 +15,15 @@ const { formatAuthLink, downloadSlackFile } = require('../services/chatPlatform/
 
 const router = express.Router();
 
+// In-memory store for Slack OAuth state (short-lived, 5-min TTL)
+const slackOAuthStates = new Map();
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, ts] of slackOAuthStates) {
+    if (now - ts > 5 * 60 * 1000) slackOAuthStates.delete(key);
+  }
+}, 60 * 1000);
+
 // Slack WebClient — initialized lazily once we have a valid token
 let slackClient = null;
 function getSlackClient() {
@@ -130,11 +139,13 @@ router.get('/install', (req, res) => {
   const scopes = 'chat:write,commands,files:read,im:history,im:write,app_mentions:read,users:read';
   const clientId = process.env.SLACK_CLIENT_ID;
   const redirectUri = `${getBaseUrl(req)}/api/slack/oauth/callback`;
-  res.redirect(`https://slack.com/oauth/v2/authorize?client_id=${clientId}&scope=${scopes}&redirect_uri=${encodeURIComponent(redirectUri)}`);
+  const state = crypto.randomBytes(24).toString('hex');
+  slackOAuthStates.set(state, Date.now());
+  res.redirect(`https://slack.com/oauth/v2/authorize?client_id=${clientId}&scope=${scopes}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}`);
 });
 
 router.get('/oauth/callback', async (req, res) => {
-  const { code, error } = req.query;
+  const { code, error, state } = req.query;
 
   if (error) {
     console.error('Slack OAuth error:', error);
@@ -143,6 +154,10 @@ router.get('/oauth/callback', async (req, res) => {
   if (!code) {
     return res.status(400).send('Missing authorization code. <a href="/api/slack/install">Try again</a>');
   }
+  if (!state || !slackOAuthStates.has(state)) {
+    return res.status(400).send('Invalid or expired OAuth state. <a href="/api/slack/install">Try again</a>');
+  }
+  slackOAuthStates.delete(state);
 
   try {
     const response = await fetch('https://slack.com/api/oauth.v2.access', {
@@ -165,24 +180,20 @@ router.get('/oauth/callback', async (req, res) => {
     const botToken = data.access_token;
     const teamName = data.team?.name;
 
-    console.log('');
-    console.log('═══════════════════════════════════════════════════');
-    console.log('  Slack app installed successfully!');
-    console.log(`  Team: ${teamName} (${data.team?.id})`);
-    console.log(`  SLACK_BOT_TOKEN=${botToken}`);
-    console.log('═══════════════════════════════════════════════════');
-
+    // Store token in env for this process (persists until restart)
+    process.env.SLACK_BOT_TOKEN = botToken;
     slackClient = null;
+
+    console.log(`Slack app installed successfully for team: ${teamName} (${data.team?.id})`);
 
     res.send(`
       <html>
         <body style="font-family: -apple-system, sans-serif; max-width: 600px; margin: 80px auto; text-align: center;">
           <h1>Penny is installed!</h1>
           <p>Workspace: <strong>${teamName}</strong></p>
-          <p style="background: #f4f4f4; padding: 16px; border-radius: 8px; font-family: monospace; word-break: break-all;">
-            SLACK_BOT_TOKEN=<strong>${botToken}</strong>
+          <p style="background: #e8f5e9; padding: 16px; border-radius: 8px; color: #2e7d32;">
+            Bot token has been configured. You're all set!
           </p>
-          <p>Copy the line above into your <code>server/.env</code>, then restart the server.</p>
           <p style="margin-top: 32px;"><a href="https://slack.com/app_redirect?app=${process.env.SLACK_APP_ID}">Open Penny in Slack</a></p>
         </body>
       </html>
@@ -388,12 +399,19 @@ async function handleFileUpload(event, profile, channelId, conversationKey, thre
     return;
   }
 
+  const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20 MB
+
   for (const file of event.files) {
     const supported = ['.pdf', '.docx', '.txt', '.doc'];
     const ext = (file.name || '').toLowerCase().match(/\.[^.]+$/)?.[0];
 
     if (!ext || !supported.includes(ext)) {
       await postSlackMessage(channelId, `I can only work with PDF, DOCX, and TXT files. \`${file.name}\` isn't a supported format.`, null, { threadTs });
+      continue;
+    }
+
+    if (file.size && file.size > MAX_FILE_SIZE) {
+      await postSlackMessage(channelId, `\`${file.name}\` is too large (${Math.round(file.size / 1024 / 1024)}MB). Max file size is 20MB — try uploading directly in Tendr.`, null, { threadTs });
       continue;
     }
 

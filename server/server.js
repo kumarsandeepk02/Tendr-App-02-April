@@ -116,7 +116,8 @@ app.use('/api/folders', authMiddleware, tenantMiddleware, folderRoutes);
 app.use('/api/projects', authMiddleware, tenantMiddleware, projectRoutes);
 app.use('/api/upload', authMiddleware, tenantMiddleware, uploadRoutes);
 
-// AI rate limit on heavy endpoints — MUST be mounted before chat routes
+// Chat routes: auth first, then AI rate limit on heavy endpoints, then prompt defense
+app.use('/api/chat', authMiddleware, tenantMiddleware);
 app.use('/api/chat/v2/pipeline', aiLimiter);
 app.use('/api/chat/v2/planning', aiLimiter);
 app.use('/api/chat/v2/brief', aiLimiter);
@@ -124,9 +125,7 @@ app.use('/api/chat/v2/readiness', aiLimiter);
 app.use('/api/chat/regenerate-section', aiLimiter);
 app.use('/api/chat/tools', aiLimiter);
 app.use('/api/chat/pipeline', aiLimiter);
-
-// Chat routes: auth + prompt defense
-app.use('/api/chat', authMiddleware, tenantMiddleware, promptDefenseMiddleware, chatRoutes);
+app.use('/api/chat', promptDefenseMiddleware, chatRoutes);
 
 // ── Start ───────────────────────────────────────────────────────────────────
 app.listen(PORT, () => {

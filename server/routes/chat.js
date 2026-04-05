@@ -337,11 +337,21 @@ router.post('/v2/pipeline', async (req, res) => {
       }
     );
 
-    setTimeout(() => {
+    // Heartbeat to keep connection alive (every 15s) — close only on completion or client disconnect
+    const heartbeat = setInterval(() => {
       if (!res.writableEnded) {
-        res.end();
+        res.write(`:heartbeat\n\n`);
       }
-    }, 60000);
+    }, 15000);
+    req.on('close', () => {
+      clearInterval(heartbeat);
+      if (!res.writableEnded) res.end();
+    });
+    // Safety cap at 5 minutes for extremely long generations
+    setTimeout(() => {
+      clearInterval(heartbeat);
+      if (!res.writableEnded) res.end();
+    }, 5 * 60 * 1000);
   } catch (error) {
     console.error('V2 Pipeline API error:', error.message);
     if (res.headersSent) {

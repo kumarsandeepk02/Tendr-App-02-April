@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
 import { NarrationMessage, NarrationAgent, SectionProgress, QualityReview } from '../../types';
 import { Loader2, CheckCircle2, Sparkles, Brain, PenTool, ShieldCheck, ArrowRight, FileDown, MessageSquare } from 'lucide-react';
 
@@ -173,14 +174,9 @@ const HandoverBanner: React.FC<{ message: NarrationMessage }> = ({ message }) =>
   return (
     <div className="flex items-center justify-center gap-2 py-2.5 px-4 my-2 bg-indigo-50 border border-indigo-200 rounded-lg">
       <ArrowRight size={14} className="text-indigo-500 flex-shrink-0" />
-      <p
-        className="text-xs font-medium text-indigo-700 text-center"
-        dangerouslySetInnerHTML={{
-          __html: message.content
-            .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-            .replace(/\*(.*?)\*/g, '<em>$1</em>'),
-        }}
-      />
+      <span className="text-xs font-medium text-indigo-700 text-center [&_strong]:font-bold [&_em]:italic">
+        <ReactMarkdown components={{ p: ({ children }) => <>{children}</> }}>{message.content}</ReactMarkdown>
+      </span>
     </div>
   );
 };
@@ -221,20 +217,17 @@ const NarrationItem: React.FC<{ message: NarrationMessage }> = ({ message }) => 
             <AgentBadge agent={message.agent} />
           </div>
         )}
-        <p
-          className={`text-sm ${
+        <span
+          className={`text-sm [&_strong]:font-bold [&_em]:italic ${
             isComplete
               ? 'text-green-700 font-medium'
               : message.type === 'thinking'
               ? 'text-gray-500 italic'
               : 'text-gray-700'
           }`}
-          dangerouslySetInnerHTML={{
-            __html: message.content
-              .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-              .replace(/\*(.*?)\*/g, '<em>$1</em>'),
-          }}
-        />
+        >
+          <ReactMarkdown components={{ p: ({ children }) => <>{children}</> }}>{message.content}</ReactMarkdown>
+        </span>
       </div>
     </div>
   );
