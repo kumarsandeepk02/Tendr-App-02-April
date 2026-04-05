@@ -1,7 +1,8 @@
 require('dotenv').config({ override: true });
 
 // Sentry must init before other imports
-const { initSentry } = require('./services/sentry');
+const { initSentry, captureError, Sentry } = require('./services/sentry');
+const crypto = require('crypto');
 initSentry();
 
 const express = require('express');
@@ -75,6 +76,31 @@ if (slackRouter) {
 app.use(express.json({ limit: '10mb' }));
 app.use(cookieParser(process.env.SESSION_SECRET));
 
+// ── Structured Request Logging ─────────────────────────────────────────────
+app.use((req, res, next) => {
+  const traceId = crypto.randomBytes(8).toString('hex');
+  req.traceId = traceId;
+  res.setHeader('X-Trace-Id', traceId);
+  const start = Date.now();
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    const log = {
+      traceId,
+      method: req.method,
+      path: req.path,
+      status: res.statusCode,
+      duration,
+      userId: req.auth?.profileId || undefined,
+    };
+    if (res.statusCode >= 500) {
+      console.error(JSON.stringify(log));
+    } else if (res.statusCode >= 400 || duration > 5000) {
+      console.warn(JSON.stringify(log));
+    }
+  });
+  next();
+});
+
 // ── Rate Limiting ───────────────────────────────────────────────────────────
 
 // General API rate limit: 60 req/min
@@ -103,9 +129,16 @@ const aiLimiter = rateLimit({
 // ── Auth routes (public — no middleware) ─────────────────────────────────────
 app.use('/api/auth', authRoutes);
 
-// ── Health check (public) ───────────────────────────────────────────────────
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: Date.now() });
+// ── Health check (public, with DB ping) ────────────────────────────────────
+app.get('/api/health', async (req, res) => {
+  try {
+    const { sql: rawSql } = require('./db');
+    await rawSql`SELECT 1`;
+    res.json({ status: 'ok', db: 'ok', timestamp: Date.now() });
+  } catch (err) {
+    console.error('Health check DB ping failed:', err.message);
+    res.status(503).json({ status: 'degraded', db: 'error', timestamp: Date.now() });
+  }
 });
 
 // ── Admin routes — auth + tenant + admin role ──────────────────────────────
@@ -127,7 +160,40 @@ app.use('/api/chat/tools', aiLimiter);
 app.use('/api/chat/pipeline', aiLimiter);
 app.use('/api/chat', promptDefenseMiddleware, chatRoutes);
 
-// ── Start ───────────────────────────────────────────────────────────────────
-app.listen(PORT, () => {
+// ─�� Global Error Handler (must be last middleware) ─────────────────────────
+app.use((err, req, res, _next) => {
+  const traceId = req.traceId || 'unknown';
+  console.error(JSON.stringify({
+    traceId,
+    error: err.message,
+    stack: IS_PROD ? undefined : err.stack,
+    method: req.method,
+    path: req.path,
+    userId: req.auth?.profileId,
+  }));
+  captureError(err, { traceId, path: req.path, userId: req.auth?.profileId });
+  if (!res.headersSent) {
+    res.status(err.status || 500).json({ error: IS_PROD ? 'Internal server error' : err.message });
+  }
+});
+
+// ── Start + Graceful Shutdown ──────────────────────────────────────────────
+const server = app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT} (${IS_PROD ? 'production' : 'development'})`);
 });
+
+function gracefulShutdown(signal) {
+  console.log(`${signal} received — shutting down gracefully`);
+  server.close(() => {
+    console.log('HTTP server closed');
+    process.exit(0);
+  });
+  // Force exit after 10s if connections don't close
+  setTimeout(() => {
+    console.error('Forced shutdown after timeout');
+    process.exit(1);
+  }, 10000).unref();
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));

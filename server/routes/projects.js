@@ -1,8 +1,8 @@
 const express = require('express');
 const { db } = require('../db');
-const { projects, documentSections, qualityReviews, competitiveIntel, documentAnalyses } = require('../db/schema');
+const { projects, documentSections, qualityReviews, competitiveIntel, documentAnalyses, planningMessages: planningMessagesTable, projectFileContexts } = require('../db/schema');
 const { getAuth } = require('../middleware/auth');
-const { eq, and, desc, isNull } = require('drizzle-orm');
+const { eq, and, desc, isNull, count: countFn } = require('drizzle-orm');
 const { validate, createProjectSchema, updateProjectSchema, updateSectionsSchema } = require('../middleware/validate');
 
 const router = express.Router();
@@ -22,11 +22,13 @@ router.get('/', async (req, res) => {
       conditions.push(eq(projects.folderId, req.query.folderId));
     }
 
-    const rows = await db
-      .select()
-      .from(projects)
-      .where(and(...conditions))
-      .orderBy(desc(projects.updatedAt));
+    const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+    const offset = parseInt(req.query.offset) || 0;
+
+    const [rows, [{ total }]] = await Promise.all([
+      db.select().from(projects).where(and(...conditions)).orderBy(desc(projects.updatedAt)).limit(limit).offset(offset),
+      db.select({ total: countFn() }).from(projects).where(and(...conditions)),
+    ]);
 
     const includeBriefs = req.query.includeBriefs === 'true';
 
@@ -52,7 +54,7 @@ router.get('/', async (req, res) => {
       } : {}),
     }));
 
-    res.json({ projects: result });
+    res.json({ projects: result, total: Number(total), limit, offset });
   } catch (error) {
     console.error('List projects error:', error);
     res.status(500).json({ error: 'Failed to load projects' });
@@ -202,6 +204,25 @@ router.patch('/:id', validate(updateProjectSchema), async (req, res) => {
 
     if (!updated) {
       return res.status(404).json({ error: 'Project not found' });
+    }
+
+    // Write-through: sync planningMessages to normalized table
+    if (updates.planningMessages && Array.isArray(updates.planningMessages)) {
+      try {
+        await db.delete(planningMessagesTable).where(eq(planningMessagesTable.projectId, id));
+        if (updates.planningMessages.length > 0) {
+          await db.insert(planningMessagesTable).values(
+            updates.planningMessages.map((m, i) => ({
+              projectId: id,
+              role: m.role || 'user',
+              content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
+              order: i,
+            }))
+          );
+        }
+      } catch (e) {
+        console.warn('Planning messages write-through failed (non-blocking):', e.message);
+      }
     }
 
     res.json({

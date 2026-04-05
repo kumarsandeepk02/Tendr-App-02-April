@@ -439,6 +439,41 @@ const chatConversations = pgTable(
   ]
 );
 
+// ── Planning Messages (normalized from projects.planningMessages blob) ────
+const planningMessages = pgTable(
+  'planning_messages',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    role: varchar('role', { length: 20 }).notNull(),
+    content: text('content').notNull(),
+    order: integer('order').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_planning_messages_project').on(table.projectId, table.order),
+  ]
+);
+
+// ── Project File Context (normalized from projects.fileContext blob) ──────
+const projectFileContexts = pgTable(
+  'project_file_contexts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    fileName: text('file_name').notNull(),
+    content: text('content').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_project_file_contexts_project').on(table.projectId),
+  ]
+);
+
 // ── OAuth States (replaces in-memory Map for auth state/exchange codes) ───
 const oauthStates = pgTable(
   'oauth_states',
@@ -482,4 +517,6 @@ module.exports = {
   externalIdentities,
   chatConversations,
   oauthStates,
+  planningMessages,
+  projectFileContexts,
 };

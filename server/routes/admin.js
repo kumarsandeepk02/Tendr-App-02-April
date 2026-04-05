@@ -1,7 +1,7 @@
 const express = require('express');
 const { db } = require('../db');
 const { tenants, profiles, projects, projectFolders } = require('../db/schema');
-const { eq, count, desc } = require('drizzle-orm');
+const { eq, count, desc, sql } = require('drizzle-orm');
 const { adminRoleCheck } = require('../middleware/tenant');
 
 const router = express.Router();
@@ -13,31 +13,44 @@ const router = express.Router();
  */
 router.get('/tenants', async (req, res) => {
   try {
-    const allTenants = await db
-      .select()
-      .from(tenants)
-      .orderBy(desc(tenants.createdAt));
+    const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+    const offset = parseInt(req.query.offset) || 0;
 
-    const result = [];
-    for (const t of allTenants) {
-      const [userCount] = await db.select({ count: count() }).from(profiles).where(eq(profiles.tenantId, t.id));
-      const [docCount] = await db.select({ count: count() }).from(projects).where(eq(projects.tenantId, t.id));
+    const [allTenants, [{ total }]] = await Promise.all([
+      db.select().from(tenants).orderBy(desc(tenants.createdAt)).limit(limit).offset(offset),
+      db.select({ total: count() }).from(tenants),
+    ]);
 
-      result.push({
-        id: t.id,
-        slug: t.slug,
-        name: t.name,
-        type: t.type,
-        workosOrgId: t.workosOrgId,
-        settings: t.settings,
-        userCount: Number(userCount?.count || 0),
-        documentCount: Number(docCount?.count || 0),
-        createdAt: new Date(t.createdAt).getTime(),
-        updatedAt: new Date(t.updatedAt).getTime(),
-      });
+    // Grouped counts — two queries instead of 2N
+    const tenantIds = allTenants.map((t) => t.id);
+    let userCounts = {};
+    let docCounts = {};
+    if (tenantIds.length > 0) {
+      const idList = sql.join(tenantIds.map(id => sql`${id}`), sql`, `);
+      const [uRows, dRows] = await Promise.all([
+        db.select({ tenantId: profiles.tenantId, count: count() }).from(profiles)
+          .where(sql`${profiles.tenantId} IN (${idList})`).groupBy(profiles.tenantId),
+        db.select({ tenantId: projects.tenantId, count: count() }).from(projects)
+          .where(sql`${projects.tenantId} IN (${idList})`).groupBy(projects.tenantId),
+      ]);
+      for (const r of uRows) userCounts[r.tenantId] = Number(r.count);
+      for (const r of dRows) docCounts[r.tenantId] = Number(r.count);
     }
 
-    res.json({ tenants: result });
+    const result = allTenants.map((t) => ({
+      id: t.id,
+      slug: t.slug,
+      name: t.name,
+      type: t.type,
+      workosOrgId: t.workosOrgId,
+      settings: t.settings,
+      userCount: userCounts[t.id] || 0,
+      documentCount: docCounts[t.id] || 0,
+      createdAt: new Date(t.createdAt).getTime(),
+      updatedAt: new Date(t.updatedAt).getTime(),
+    }));
+
+    res.json({ tenants: result, total: Number(total), limit, offset });
   } catch (error) {
     console.error('Admin list tenants error:', error);
     res.status(500).json({ error: 'Failed to list tenants' });

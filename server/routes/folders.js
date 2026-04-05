@@ -2,7 +2,7 @@ const express = require('express');
 const { db } = require('../db');
 const { projectFolders, projects } = require('../db/schema');
 const { getAuth } = require('../middleware/auth');
-const { eq, and, desc, count } = require('drizzle-orm');
+const { eq, and, desc, count, sql } = require('drizzle-orm');
 
 const router = express.Router();
 
@@ -13,19 +13,26 @@ router.get('/', async (req, res) => {
     const conditions = [eq(projectFolders.userId, profileId)];
     if (tenantId) conditions.push(eq(projectFolders.tenantId, tenantId));
 
-    const rows = await db
-      .select()
-      .from(projectFolders)
-      .where(and(...conditions))
-      .orderBy(desc(projectFolders.updatedAt));
+    const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+    const offset = parseInt(req.query.offset) || 0;
 
-    const counts = {};
-    for (const folder of rows) {
-      const [result] = await db
-        .select({ count: count() })
+    const [rows, [{ total }]] = await Promise.all([
+      db.select().from(projectFolders).where(and(...conditions)).orderBy(desc(projectFolders.updatedAt)).limit(limit).offset(offset),
+      db.select({ total: count() }).from(projectFolders).where(and(...conditions)),
+    ]);
+
+    // Grouped count — single query instead of N+1
+    const folderIds = rows.map((f) => f.id);
+    let counts = {};
+    if (folderIds.length > 0) {
+      const countRows = await db
+        .select({ folderId: projects.folderId, count: count() })
         .from(projects)
-        .where(eq(projects.folderId, folder.id));
-      counts[folder.id] = Number(result?.count || 0);
+        .where(sql`${projects.folderId} IN (${sql.join(folderIds.map(id => sql`${id}`), sql`, `)})`)
+        .groupBy(projects.folderId);
+      for (const r of countRows) {
+        counts[r.folderId] = Number(r.count);
+      }
     }
 
     res.json({
@@ -37,6 +44,9 @@ router.get('/', async (req, res) => {
         createdAt: new Date(f.createdAt).getTime(),
         updatedAt: new Date(f.updatedAt).getTime(),
       })),
+      total: Number(total),
+      limit,
+      offset,
     });
   } catch (error) {
     console.error('List folders error:', error);
